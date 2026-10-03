@@ -8,6 +8,9 @@
 - **适用硬件**：RTX 40 系（sm_89）。本文在 **RTX 4070 Ti 12GB** 实测；
   官方在 **RTX 4080 SUPER（32GB 魔改）** 验证过（262K 上下文 / decode 226 tok/s）。
   RTX 50 系暂不支持：vendor 源码（Ada fork）的 device.h 仅认 SM86/89（见 Roadmap）。
+  **RTX 30 系（sm_86）走另一条线**：官方"省显存档"（llama.cpp + KVMem），
+  本仓库已在 **RTX 3060 12GB** 上完整落地并实测（128K 上下文 / decode 34~41 t/s）——
+  见 **[docs/省显存档-路线A-sm86实测.md](docs/省显存档-路线A-sm86实测.md)** 与 `scripts/start-kvmem.sh`。
 - **适用系统**：**Linux x64**（Ubuntu 26.04 实测；Windows 请直接用官方交付包的 exe）。
 - **最终形态**：OpenAI 兼容 HTTP 服务（`/v1/chat/completions`），支持思考模式。
 
@@ -385,7 +388,9 @@ A: 本线是 CUDA 原生内核（GEMV/mma 双路径 + MTP 投机解码 + CUDA Gr
 4080S 上 decode 226 t/s；三元 GGUF 需要 PrismML 特供的 llama.cpp fork，且没有官方
 Linux 预编译。两条线制品不通用（.ninfer vs .gguf）。作者另发"超低显存档"
 （llama.cpp + KVMem 三元线，显存下限更低、上下文更长）：
-https://pan.quark.cn/s/fd20cf86d3ca ——那是另一条引擎线，与本文不通用。
+https://pan.quark.cn/s/fd20cf86d3ca ——那是另一条引擎线，与本文的 .ninfer 制品不通用。
+**本仓库已把这条线在 RTX 3060 12GB（30 系 / sm_86）上跑通并实测**（自编，免 root）：
+见 [docs/省显存档-路线A-sm86实测.md](docs/省显存档-路线A-sm86实测.md)。
 
 **Q: 能开多路并发吗？**
 A: 引擎支持，但官方口径单路优先（每加一路单路掉 ~28%，聚合吞吐仍涨：本机 4 路聚合 336 t/s）。
@@ -404,8 +409,13 @@ A: 4090 同 sm_89，照抄本文参数即可。5090（sm_120a）官方基线约�
 但本仓库 vendor 源码（Ada fork）暂编不了 120a，需上游 Neroued 树（见 Roadmap）。
 
 **Q: RTX 30 系 / 更老的卡能跑吗？**
-A: NInfer 引擎只支持 sm_89/120a，容器化也不改变这一点。老卡走官方"超低显存档"的
-llama.cpp 线（SM 75~120a）。
+A: NInfer 引擎只支持 sm_89/120a，容器化也不改变这一点。30 系走官方"省显存档"的
+llama.cpp 线（SM 75~120a）——本仓库已在 **RTX 3060 12GB（sm_86）** 上实测通过：
+自编 `kvmem-llama.cpp` 的 Bonsai 分支（**官方 Linux 预编译不含三元格式，必须自编；
+全程免 root**），128K 上下文、109k token 召回正确、decode 34~41 t/s、
+峰值显存 8.8 GiB / 12 GB。完整步骤、参数、坑与两条线的取舍见
+**[docs/省显存档-路线A-sm86实测.md](docs/省显存档-路线A-sm86实测.md)**；
+一键构建 `scripts/build-kvmem-sm86.sh`，启停 `scripts/start-kvmem.sh`。
 
 ---
 
