@@ -416,6 +416,8 @@ llama.cpp 线（SM 75~120a）——本仓库已在 **RTX 3060 12GB（sm_86）** 
 峰值显存 8.8 GiB / 12 GB。完整步骤、参数、坑与两条线的取舍见
 **[docs/省显存档-路线A-sm86实测.md](docs/省显存档-路线A-sm86实测.md)**；
 一键构建 `scripts/build-kvmem-sm86.sh`，启停 `scripts/start-kvmem.sh`。
+接 OpenAI 客户端（ZCode/Chatbox 等）前先跑一次 `patches/apply-kvmem-compat.sh`——
+客户端默认发的 `reasoning_effort: "high"` 不在模板允许值里，会 400（修复无需重编引擎）。
 
 ---
 

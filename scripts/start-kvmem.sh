@@ -115,6 +115,13 @@ ARGS=(-m "$MODEL" -ngl 99 --host 127.0.0.1 --port "$PORT"
 # 预编译包里的 share/kvmem/ui 才是静态页；两者都没有时只提供 API。
 if [[ -r "$UI_DIR/index.html" ]]; then ARGS+=(--ui-dir "$UI_DIR"); fi
 
+# 对话模板别名补丁：模型自带模板只认 reasoning_effort ∈ {xhigh, medium, low}，
+# 而很多客户端会发 high / max / minimal（ZCode 就发 high）→ 模板抛异常 → HTTP 400。
+# 挂一份把别名归一化的模板副本（原模板 + 归一逻辑），不重编引擎。
+# 生成/重生成：patches/apply-kvmem-compat.sh <model.gguf>
+TEMPLATE="$REPO/patches/bonsai-chat-template-alias.jinja"
+if [[ -r "$TEMPLATE" ]]; then ARGS+=(--chat-template-file "$TEMPLATE"); fi
+
 echo "启动 llama-kvmem-server | profile=$PROFILE | 端口=$PORT | 上下文=$CTX | GPU 窗口=$BUDGET+$RESERVE | KV=$KV"
 echo "日志: $LOGFILE"
 nohup "$BIN" "${ARGS[@]}" >"$LOGFILE" 2>&1 &

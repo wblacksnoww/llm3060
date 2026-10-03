@@ -143,6 +143,42 @@ PYTHONPATH=$PWD/pylibs python3 scripts/bonsai-mtp-graft.py \
 > 本机实测 **MTP1 是甜点，MTP2 反而变慢**（34.6 vs 39.3 t/s）——3060 算力/带宽都低，
 > 多草稿的额外计算吃掉了收益。
 
+### 接 OpenAI 客户端（ZCode / Chatbox / Cherry Studio 等）
+
+| 客户端里填 | 值 |
+|---|---|
+| Base URL | `http://127.0.0.1:18202/v1` |
+| API Key | 任意（服务端不校验，如 `ssss`） |
+| 模型名 | 任意（如 `bonsai`）——服务端忽略该字段 |
+
+**★ 必打兼容补丁：`reasoning_effort` 别名。** 模型自带聊天模板只认
+`xhigh / medium / low`，而 OpenAI 系客户端默认发 **`high`**（ZCode 发
+`{"reasoning_effort":"high","enable_thinking":true}`），模板会直接抛异常 → **HTTP 400**：
+
+```
+Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.
+```
+
+修法与 ninfer 线的 `patches/apply-compat.sh`（P1）同类，但**不用重编引擎**——挂一份模板副本即可：
+
+```bash
+./patches/apply-kvmem-compat.sh models/Ternary-Bonsai-2-27B-PTQ1_0.gguf   # 生成别名模板
+# start-kvmem.sh 会自动带上 --chat-template-file patches/bonsai-chat-template-alias.jinja
+```
+
+**实测接 ZCode**（把本服务配成 provider，2026-10-03）：
+
+| 项 | 实测 |
+|---|---|
+| 请求规模 | 系统提示 + **33 个工具** = **22,148 token** 提示 |
+| 首轮（冷 prefill） | **~100 s**（prefill 231.6 t/s） |
+| 第二轮起 | **1~2 s**（KVMem 前缀缓存命中 22147/22148 token） |
+| 单轮生成上限 | 10240 token（= `--kvmem-gen-reserve`）；客户端要 32000 会被截断（`finish_reason: length`） |
+| 工具调用 | 文本回复正常；27B 三元模型对 33 工具的调用能力**未经充分验证**，别期待能稳定当编码 agent |
+
+> 一句话：接上去能用，**首轮慢、之后每轮 1~2 秒**；想让它当 agent 干活，建议先把
+> ZCode 的思考关掉或调低（思考 token 会计入 10240 上限，且明显拖慢）。
+
 ---
 
 ## 6. 与 ninfer 线（报告里的"路线 B"）怎么选
@@ -174,6 +210,7 @@ PYTHONPATH=$PWD/pylibs python3 scripts/bonsai-mtp-graft.py \
 | 4 | 走系统代理下载 6 GB 模型只有 ~390 KB/s | 国内镜像应**绕过代理直连**：`curl --noproxy '*'` → hf-mirror 实测 35 MB/s |
 | 5 | `python3` 无 pip / 无 numpy（合并 MTP 头要用） | 不要装系统包：直接下 `numpy-*-cp314-*-manylinux*.whl`（wheel 就是 zip），`unzip` 到目录 + `PYTHONPATH` 即可 |
 | 6 | 长 prompt 下 decode 偏低（27 t/s） | 短输出样本（8 token）被每轮固定开销主导 —— **测速要看 ≥300 token 的长输出**（报告里"短输出伪造低接受率"的同源教训） |
+| 7 | 接 ZCode/客户端后整轮 400：`Unexpected reasoning effort high` | 客户端发 `reasoning_effort:"high"`，模板只认 xhigh/medium/low，模板抛异常 ⇒ 挂别名模板（`patches/apply-kvmem-compat.sh` + `--chat-template-file`），**不用重编**。注意：关掉思考时该字段不校验，所以只有"思考开"的客户端才会踩到 |
 
 ---
 
