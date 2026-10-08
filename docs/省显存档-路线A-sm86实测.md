@@ -211,6 +211,7 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 | 5 | `python3` 无 pip / 无 numpy（合并 MTP 头要用） | 不要装系统包：直接下 `numpy-*-cp314-*-manylinux*.whl`（wheel 就是 zip），`unzip` 到目录 + `PYTHONPATH` 即可 |
 | 6 | 长 prompt 下 decode 偏低（27 t/s） | 短输出样本（8 token）被每轮固定开销主导 —— **测速要看 ≥300 token 的长输出**（报告里"短输出伪造低接受率"的同源教训） |
 | 7 | 接 ZCode/客户端后整轮 400：`Unexpected reasoning effort high` | 客户端发 `reasoning_effort:"high"`，模板只认 xhigh/medium/low，模板抛异常 ⇒ 挂别名模板（`patches/apply-kvmem-compat.sh` + `--chat-template-file`），**不用重编**。注意：关掉思考时该字段不校验，所以只有"思考开"的客户端才会踩到 |
+| 8 | 长会话某轮开始稳定 400：`{"error":"prompt + max_tokens exceeds n_ctx"}` | **上下文用满**：提示 token + 单轮预留（10240）> `-c`(131072)，上限其实是 **120832** 个提示 token。这是校验期秒拒（不是超时）。处置：新开会话；或 `KVMEM_RESERVE=4096`（让出约 6K 提示空间，输出上限同步降）；或 `KVMEM_CTX=262144` 顶到模型原生 256K（KV 在主机内存，显存不变，超长召回属官方实验特性）|
 
 ---
 

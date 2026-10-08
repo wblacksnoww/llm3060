@@ -17,6 +17,12 @@
 #   low    省显存档：64K 上下文、12K 窗口 + 6K 预留（边办公边跑）。
 #   fast   短上下文快速档：8K 上下文、4K 窗口 + 2K 预留。
 #
+# 环境变量覆盖（长会话撞上下文上限时用）:
+#   KVMEM_CTX=262144     逻辑上下文顶到模型原生 256K（历史 KV 在内存，显存不变）
+#   KVMEM_RESERVE=4096   缩小单轮生成预留 → 给提示让出约 6K 空间（输出上限同步降到 4096）
+#   KVMEM_BUDGET=32768   加大 GPU 检索窗口（多吃显存）
+# 例：KVMEM_CTX=262144 KVMEM_RESERVE=8192 ./scripts/start-kvmem.sh work
+#
 # 首次使用前先跑 scripts/build-kvmem-sm86.sh 准备引擎（免 root 工具链 + 编译）。
 #
 # 请求方式（OpenAI 兼容，与 ninfer 线一致；注意 30 系没有 FP8 张量核，
@@ -57,6 +63,16 @@ case "$PROFILE" in
     fast) CTX=8192;   BUDGET=4096;  RESERVE=2048;  KV="q8_0" ;;  # 8K / 最省显存
     *) echo "未知档位: $PROFILE（可选 work|low|fast）" >&2; exit 2 ;;
 esac
+
+# 可用环境变量覆盖（例：上下文顶到模型原生 256K；或缩小单轮预留给长提示让路）
+#   KVMEM_CTX=262144 KVMEM_RESERVE=8192 ./scripts/start-kvmem.sh work
+# 约束：budget + reserve ≤ ctx，且 reserve ≥ 客户端的单轮输出上限
+CTX="${KVMEM_CTX:-$CTX}"
+RESERVE="${KVMEM_RESERVE:-$RESERVE}"
+BUDGET="${KVMEM_BUDGET:-$BUDGET}"
+if (( BUDGET + RESERVE > CTX )); then
+    echo "参数不合法: budget($BUDGET) + reserve($RESERVE) > ctx($CTX)" >&2; exit 2
+fi
 
 PIDFILE="$LOGDIR/kvmem-$PROFILE.pid"
 LOGFILE="$LOGDIR/kvmem-$PROFILE.log"
