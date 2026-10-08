@@ -9,13 +9,15 @@
 #   ./start-kvmem.sh [profile] [port]       启动（默认 profile=work 端口=18202）
 #   ./start-kvmem.sh stop   [profile]       停止
 #   ./start-kvmem.sh status [profile]       状态
-#   ./start-kvmem.sh logs   [profile]       跟踪日志
-#
+#   ./start-kvmem.sh logs   [profile]       跟踪日志#
 # profile（3060 12GB 实测）:
 #   work   默认。128K 逻辑上下文（KVMem 历史 KV 放主机内存，GPU 只驻留窗口），
 #          GPU 窗口 24K 检索 + 10K 生成预留，主 KV q8_0，思考开（预算 4096）。
 #   low    省显存档：64K 上下文、12K 窗口 + 6K 预留（边办公边跑）。
 #   fast   短上下文快速档：8K 上下文、4K 窗口 + 2K 预留。
+#   long   256K 档（= 模型原生上限，2026-10-08 实机验证）：给长会话用。
+#          实测：12.1 万 token 提示预填充 571 s（211 t/s），显存 8.6 GiB（与 128K 档几乎相同，
+#          历史 KV 在主机内存），主机内存 15 GiB/30 GiB。提示上限 = ctx − reserve = 251904。
 #
 # 环境变量覆盖（长会话撞上下文上限时用）:
 #   KVMEM_CTX=262144     逻辑上下文顶到模型原生 256K（历史 KV 在内存，显存不变）
@@ -61,7 +63,8 @@ case "$PROFILE" in
     work) CTX=131072; BUDGET=24576; RESERVE=10240; KV="q8_0" ;;  # 128K 逻辑上下文
     low)  CTX=65536;  BUDGET=12288; RESERVE=6144;  KV="q8_0" ;;  # 64K / 省显存
     fast) CTX=8192;   BUDGET=4096;  RESERVE=2048;  KV="q8_0" ;;  # 8K / 最省显存
-    *) echo "未知档位: $PROFILE（可选 work|low|fast）" >&2; exit 2 ;;
+    long) CTX=262144; BUDGET=24576; RESERVE=10240; KV="q8_0" ;;  # 256K：模型原生上限，长会话用
+    *) echo "未知档位: $PROFILE（可选 work|low|fast|long）" >&2; exit 2 ;;
 esac
 
 # 可用环境变量覆盖（例：上下文顶到模型原生 256K；或缩小单轮预留给长提示让路）
