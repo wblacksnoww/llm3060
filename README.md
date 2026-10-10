@@ -415,17 +415,18 @@ tail -3 "$(ls -t ~/kvmem-logs/kvmem-*.log | head -1)"   # 自动挑最近在写�
 选型、约束与施工步骤见 **[docs/本地视频生成-方案与约束.md](docs/本地视频生成-方案与约束.md)**。
 注意视频模型与文字模型**抢显存**，跑之前先 `./scripts/start-kvmem.sh stop`。
 
-**看图（视觉）**：视觉塔已装好（`models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`，0.63 GB，sha256 已核对官方值）。
-默认**不挂**（纯文本时不占显存），要用就加一个环境变量：
+**看图（视觉）—— 默认开启**：视觉塔已装好（`models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`，0.63 GB，
+sha256 已核对官方值），启动时**自动挂上**，贴图直接可用（显存 +约 0.6 GB）。
 
 ```bash
-KVMEM_VISION=1 ./scripts/start-kvmem.sh long                      # 挂视觉塔（显存 +约 0.6 GB）
-KVMEM_VISION=1 KVMEM_VISION_CPU=1 ./scripts/start-kvmem.sh long   # 显存紧张时把编码器放 CPU
+./scripts/start-kvmem.sh long                      # 默认就带视觉
+KVMEM_VISION=0 ./scripts/start-kvmem.sh long       # 显存紧张时关掉视觉
+KVMEM_VISION_CPU=1 ./scripts/start-kvmem.sh long   # 保留视觉但把编码器放 CPU
 ```
 
 实测（RTX 3060 12GB）：首次带图请求 76 秒（含编码器加载），之后同一张图 **2.2 秒**；
 中文表格截图能逐字读对表头（14.7 秒 / 2067 提示 token）。
-**不挂视觉时发图会直接失败**（日志 `multimodal_error: multimodal prefill failed or cancelled`，
+不挂视觉时发图会直接失败（日志 `multimodal_error: multimodal prefill failed or cancelled`，
 客户端表现为"一个 token 都不出"）。
 
 **打游戏前先停服务**：游戏和模型都要显存，12GB 不够分（实测见 §8 症状表）。

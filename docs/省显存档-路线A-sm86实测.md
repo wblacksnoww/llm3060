@@ -308,14 +308,15 @@ total time = 1620 ms / 283 tokens                                           ← 
   在 30 GB 机器上已接近上限，跑长会话时别同时开别的吃内存的程序
 - **速度**：decode 34 t/s（MTP1 39~41）｜prefill 206~233 t/s（与上下文长度基本无关）
 
-### 8.6 看图（视觉）—— 已装好并实测
+### 8.6 看图（视觉）—— 默认开启，已实测
 
 视觉塔：`models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`（0.63 GB，官方 Q8_0 包，
-sha256 `6807ede6…` 与 HF 一致）。**默认不挂**（纯文本时不占显存），要用就：
+sha256 `6807ede6…` 与 HF 一致）。**启动时自动挂上**（显存 +约 0.6 GB），贴图即用：
 
 ```bash
-KVMEM_VISION=1 ./scripts/start-kvmem.sh long                      # 编码器放 GPU（默认）
-KVMEM_VISION=1 KVMEM_VISION_CPU=1 ./scripts/start-kvmem.sh long   # 放 CPU，省显存
+./scripts/start-kvmem.sh long                      # 默认带视觉
+KVMEM_VISION=0 ./scripts/start-kvmem.sh long       # 关掉（显存紧张 / 只跑纯文本）
+KVMEM_VISION_CPU=1 ./scripts/start-kvmem.sh long   # 保留视觉，编码器放 CPU
 ```
 
 **本机实测（RTX 3060 12GB）**：
