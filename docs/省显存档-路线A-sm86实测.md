@@ -231,7 +231,69 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 
 ---
 
-## 8. 复现清单（TL;DR）
+## 8. 日常运维与排错速查
+
+### 8.1 档位与覆盖变量
+
+| 档位 | `-c` 上下文 | GPU 窗口（budget+reserve） | 单轮输出上限 | 提示上限 = ctx − reserve |
+|---|---|---|---|---|
+| `work`（默认） | 131072 | 24576 + 10240 | 10240 | 120832 |
+| `long` | **262144** | 24576 + 10240 | 10240 | **251904** |
+| `low` | 65536 | 12288 + 6144 | 6144 | 59392 |
+| `fast` | 8192 | 4096 + 2048 | 2048 | 6144 |
+
+```bash
+./scripts/start-kvmem.sh work|long|low|fast [port]   # 启动
+./scripts/start-kvmem.sh stop|status|logs [profile]  # 停止/状态/跟日志
+```
+
+环境变量覆盖默认值（长会话撞上限时用）：
+
+| 变量 | 作用 |
+|---|---|
+| `KVMEM_CTX=262144` | 逻辑上下文顶到模型原生 256K（历史 KV 在主机内存，**显存不变**） |
+| `KVMEM_RESERVE=4096` | 缩小单轮预留 → 给提示让出约 6K 空间（输出上限同步降到 4096） |
+| `KVMEM_BUDGET=32768` | 加大 GPU 检索窗口（多吃显存） |
+| `KVMEM_MTP=1` | 开 MTP1 投机解码（需 MTP 模型，+15~22% decode，显存 +0.6 GiB） |
+| `KVMEM_DRAFT_N=2` | 草稿 2 个（**3060 上反而更慢**，别用） |
+| `KVMEM_MODEL=<路径>` | 换模型（如 PQ2_0 打包版），不用重编 |
+
+### 8.2 三条硬规则
+
+1. **提示 token ≤ ctx − reserve**。超了**校验期秒拒**（不是超时、不是模板问题）：`prompt + max_tokens exceeds n_ctx`。
+2. **单轮输出 ≤ reserve**（10240；**思考 token 计入**），超了截断：`finish_reason: length`。
+3. **重启服务 = 清空 KVMem 缓存**（缓存在进程内）→ 长会话的下一个请求要全量重算
+   （12 万 token ≈ 9.5 分钟）。所以别频繁重启；要重启就顺带换到 `long` 档。
+
+### 8.3 症状 → 原因 → 处置
+
+| 症状 | 原因 | 处置 |
+|---|---|---|
+| 整轮 400：`Unexpected reasoning effort high` | 客户端发 `high`，模板只认 xhigh/medium/low | 跑 `patches/apply-kvmem-compat.sh`（生成别名模板）；`start-kvmem.sh` 自动挂 |
+| 整轮 400：`prompt + max_tokens exceeds n_ctx` | 会话把上下文用满（提示 > ctx − reserve） | 新开会话 / `KVMEM_RESERVE=4096` / 用 `long` 档 |
+| 界面长时间没动静 | ① 在预填充（日志 `progress` 在涨）② 思考 token 都在"内心独白"里 | 看日志；关客户端思考（`chat_template_kwargs.enable_thinking=false`） |
+| 每轮都要好几分钟 | 缓存没命中（`cache = 0`），每次全量重算 | 若因重启导致：等它跑完一次即可恢复；若是会话过大：新开会话 |
+| 显存不够 / 起不来 | 旧实例没退，或与 ninfer 线同时跑 | `start-kvmem.sh stop` + 等 `nvidia-smi` 回落；两条线互斥 |
+
+### 8.4 日志怎么读（`tail -3 ~/kvmem-logs/kvmem-work.log`）
+
+```
+prompt processing, n_tokens = 50560, progress = 0.64, t = 241 s / 209 t/s   ← 在预填充，progress 在涨=正常
+prompt eval time = 385522 ms / 79513 tokens (206 t/s), cache = 0            ← cache=0 全量重算（慢）
+prompt eval time = 1892 ms / 174 tokens (92 t/s), cache = 120069            ← cache 大=复用（快）
+n_gen = 3820, tg = 26.8 t/s, tg_3s = 25.7 t/s                               ← 正在出字
+```
+
+### 8.5 资源账（3060 12GB / 30 GB RAM 实测）
+
+- **显存**：空载 8.06 GiB，装载 12 万 token 后 8.58 GiB（历史 KV 不在显存里，**只跟 GPU 窗口大小走**）
+- **内存**：约 **0.33 GB / 万 token**（q8_0 KV）；12 万 token ≈ 4 GB。256K 档 ≈ 8.5 GB，
+  在 30 GB 机器上已接近上限，跑长会话时别同时开别的吃内存的程序
+- **速度**：decode 34 t/s（MTP1 39~41）｜prefill 206~233 t/s（与上下文长度基本无关）
+
+---
+
+## 9. 复现清单（TL;DR）
 
 ```bash
 # 1) 引擎（免 root，见 build-kvmem-sm86.sh 全文）

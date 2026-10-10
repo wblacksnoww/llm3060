@@ -358,6 +358,56 @@ python3 scripts/suite_ninfer.py         # 深度套件：K 矩阵/投机一致�
 
 ---
 
+### 30 系（sm_86）：路线 A 省显存档（llama.cpp + KVMem）速查
+
+30 系跑不了上面的 ninfer 线，走**官方另一条线**（llama.cpp + KVMem）。本仓库已在
+**RTX 3060 12GB** 上完整落地、实测、并把日常运维都跑通了 —— 细节见
+**[docs/省显存档-路线A-sm86实测.md](docs/省显存档-路线A-sm86实测.md)**，这里只放最常用的：
+
+```bash
+cd ninfer-bonsai-4070ti
+./scripts/start-kvmem.sh long     # 起服务：256K 上下文档（长会话用；首次建议先 work）
+./scripts/start-kvmem.sh status   # 看状态；logs 跟日志
+./scripts/start-kvmem.sh stop     # 停掉（打游戏 / 跑视频生成前必做）
+```
+
+| 档位 | 逻辑上下文 | GPU 窗口 | 单轮输出上限 | 提示上限 | 用途 |
+|---|---|---|---|---|---|
+| `work` | 131072 | 24K 检索 + 10K 生成 | 10240 | 120832 | 默认 |
+| `long` | **262144** | 同上 | 10240 | **251904** | 长会话（已实测：12.1 万 token 请求通过） |
+| `low` | 65536 | 12K + 6K | 6144 | 59392 | 边办公边跑 |
+| `fast` | 8192 | 4K + 2K | 2048 | 6144 | 最省显存 |
+
+**三条硬规则**（踩过才知道）：
+
+1. **提示 token ≤ 上下文 − 单轮预留**（work 档 = 120832）。超了会被**秒拒**：
+   `{"error":"prompt + max_tokens exceeds n_ctx"}` —— 这不是卡住、也不是模板问题，就是**会话太长了**。
+   处置：新开会话 / `KVMEM_RESERVE=4096 ./scripts/start-kvmem.sh work` 让出空间 / 直接用 `long` 档。
+2. **单轮输出 ≤ 预留**（10240，**思考 token 也算在内**），超了截断（`finish_reason: length`）。
+3. **重启服务 = 清空 KVMem 缓存** → 长会话的下一个请求要全量重算（12 万 token ≈ 9.5 分钟）。别频繁重启。
+
+**接客户端（ZCode / Chatbox 等）**：Base URL 填 `http://127.0.0.1:18202/v1`，API Key 随便填，
+模型名随便填。**第一次接之前先跑一次** `./patches/apply-kvmem-compat.sh models/Ternary-Bonsai-2-27B-PTQ1_0.gguf`
+——客户端默认发的 `reasoning_effort:"high"` 不在模板允许值里，会整轮 400（修复不需要重编引擎，
+`start-kvmem.sh` 会自动挂上生成的模板）。ZCode 实测：首轮约 100 秒（2.2 万 token 系统提示 + 33 个工具），
+**第二轮起 1~2 秒**。
+
+**判断它在干活还是卡住**：
+
+```bash
+tail -3 ~/kvmem-logs/kvmem-work.log
+#   prompt processing ... progress=0.xx, t=...   → 在预填充（后面是 t/s）
+#   cache = 0                                    → 这轮全量重算（慢，分钟级）
+#   cache = 12xxxx                               → 缓存复用（快，秒级）
+#   n_gen = ..., tg = xx t/s                     → 正在生成
+```
+
+**想做视频生成？** 12GB 卡能玩但只在"尝鲜档"（480p / 约 5 秒 / 每条十几分钟起步），
+选型、约束与施工步骤见 **[docs/本地视频生成-方案与约束.md](docs/本地视频生成-方案与约束.md)**。
+注意视频模型与文字模型**抢显存**，跑之前先 `./scripts/start-kvmem.sh stop`。
+
+---
+
 ## 支持（Support）
 
 ### 踩坑实录
