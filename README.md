@@ -396,11 +396,19 @@ cd ninfer-bonsai-4070ti
 
 ```bash
 tail -3 ~/kvmem-logs/kvmem-work.log
-#   prompt processing ... progress=0.xx, t=...   → 在预填充（后面是 t/s）
-#   cache = 0                                    → 这轮全量重算（慢，分钟级）
-#   cache = 12xxxx                               → 缓存复用（快，秒级）
-#   n_gen = ..., tg = xx t/s                     → 正在生成
 ```
+
+一行日志怎么读（都是**毫秒**，`1384.52 ms` = 1.38 秒）：
+
+| 字段 | 意思 |
+|---|---|
+| `prompt eval time = 1384 ms / 274 tokens (198 t/s)` | **读你的输入**用了 1.38 秒 —— 慢一般慢在这一项 |
+| `cache = 0` / `cache = 12xxxx` | 没命中缓存 / 命中了（复用了几万 token）。**`cache = 0` 本身不可怕**：几百 token 照样秒回；可怕的是 `cache = 0` **配上几万 token 输入**，那要等几分钟 |
+| `eval time = 236 ms / 9 tokens (38 t/s)` | **写回答**用了 0.24 秒 |
+| `total time = 1620 ms` | 整个请求 1.62 秒 —— 几秒内都算正常 |
+| `prompt processing ... progress = 0.64` | 正在预填充，`progress` 在涨就是正常（后面是当前速度） |
+| `n_gen = ..., tg = xx t/s` | 正在出字 |
+| 日志完全不动 | 这才叫卡住 |
 
 **想做视频生成？** 12GB 卡能玩但只在"尝鲜档"（480p / 约 5 秒 / 每条十几分钟起步），
 选型、约束与施工步骤见 **[docs/本地视频生成-方案与约束.md](docs/本地视频生成-方案与约束.md)**。

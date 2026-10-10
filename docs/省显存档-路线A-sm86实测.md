@@ -277,12 +277,21 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 
 ### 8.4 日志怎么读（`tail -3 ~/kvmem-logs/kvmem-work.log`）
 
+一行日志分三段（时间都是**毫秒**）：`prompt eval`（读输入，慢一般慢在这）/ `cache`（缓存命中）/ `eval`（写输出）。
+
 ```
-prompt processing, n_tokens = 50560, progress = 0.64, t = 241 s / 209 t/s   ← 在预填充，progress 在涨=正常
-prompt eval time = 385522 ms / 79513 tokens (206 t/s), cache = 0            ← cache=0 全量重算（慢）
-prompt eval time = 1892 ms / 174 tokens (92 t/s), cache = 120069            ← cache 大=复用（快）
+prompt processing, n_tokens = 50560, progress = 0.64, t = 241 s / 209 t/s   ← 预填充中，progress 在涨=正常
+prompt eval time = 385522 ms / 79513 tokens (206 t/s), cache = 0            ← 7.9 万 token 全量重算 → 6.4 分钟
+prompt eval time = 1892 ms / 174 tokens (92 t/s), cache = 120069            ← 12 万 token 复用 → 1.9 秒
+prompt eval time = 1384 ms / 274 tokens (198 t/s), cache = 0                ← 274 token 无缓存 → 1.4 秒（正常）
+eval time = 236 ms / 9 tokens (38 t/s)                                      ← 写回答用了 0.24 秒
 n_gen = 3820, tg = 26.8 t/s, tg_3s = 25.7 t/s                               ← 正在出字
+total time = 1620 ms / 283 tokens                                           ← 整个请求 1.62 秒
 ```
+
+> **别把 `cache = 0` 当故障**：它只表示"没有可复用的前缀"。几百 token 的输入没缓存也是秒回；
+> 真正要等的是 **`cache = 0` 配上几万 token 输入**（那才是分钟级）。判断标准看 `total time`：
+> 几秒内正常；反复分钟级 → 查是不是每轮都在全量重算；日志完全不动 → 才叫卡住。
 
 ### 8.5 资源账（3060 12GB / 30 GB RAM 实测）
 
