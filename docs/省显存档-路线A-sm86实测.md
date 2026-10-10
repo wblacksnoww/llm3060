@@ -273,9 +273,17 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 | 整轮 400：`prompt + max_tokens exceeds n_ctx` | 会话把上下文用满（提示 > ctx − reserve） | 新开会话 / `KVMEM_RESERVE=4096` / 用 `long` 档 |
 | 界面长时间没动静 | ① 在预填充（日志 `progress` 在涨）② 思考 token 都在"内心独白"里 | 看日志；关客户端思考（`chat_template_kwargs.enable_thinking=false`） |
 | 每轮都要好几分钟 | 缓存没命中（`cache = 0`），每次全量重算 | 若因重启导致：等它跑完一次即可恢复；若是会话过大：新开会话 |
-| 显存不够 / 起不来 | 旧实例没退，或与 ninfer 线同时跑 | `start-kvmem.sh stop` + 等 `nvidia-smi` 回落；两条线互斥 |
+| **一个 token 都不出**（客户端像死了） | ① 提示里**带了图片**——本部署没挂视觉塔，请求直接失败 ② 提示太长（十几万 token）正在预填充 | ① 日志出现 `multimodal_error: multimodal prefill failed or cancelled` ⇒ 别发图；要视觉见 §8.6 ② 看日志 `progress` 是否在涨，涨就是正常在算，别重试 |
+| 显存不够 / 起不来 | 旧实例没退，或与 ninfer 线/游戏同时跑 | `start-kvmem.sh stop` + 等 `nvidia-smi` 回落；跑游戏/视频生成前先停服务 |
 
-### 8.4 日志怎么读（`tail -3 ~/kvmem-logs/kvmem-work.log`）
+### 8.4 日志怎么读
+
+**先找对文件**：日志名跟档位走（`work` → `kvmem-work.log`，`long` → `kvmem-long.log`）。
+最省事的写法：
+
+```bash
+tail -3 "$(ls -t ~/kvmem-logs/kvmem-*.log | head -1)"   # 自动挑最近在写的那个
+```
 
 一行日志分三段（时间都是**毫秒**）：`prompt eval`（读输入，慢一般慢在这）/ `cache`（缓存命中）/ `eval`（写输出）。
 
@@ -299,6 +307,24 @@ total time = 1620 ms / 283 tokens                                           ← 
 - **内存**：约 **0.33 GB / 万 token**（q8_0 KV）；12 万 token ≈ 4 GB。256K 档 ≈ 8.5 GB，
   在 30 GB 机器上已接近上限，跑长会话时别同时开别的吃内存的程序
 - **速度**：decode 34 t/s（MTP1 39~41）｜prefill 206~233 t/s（与上下文长度基本无关）
+
+### 8.6 想让它能看图（可选，未实测）
+
+本部署默认**没有视觉能力**（启动参数里没有 `--mmproj`），所以请求里带图片会直接失败：
+
+```
+E srv  KVMEM_TRACE multimodal_error error=multimodal prefill failed or cancelled
+```
+
+引擎本身支持视觉（`--mmproj PATH` / `--mmproj-offload`（默认放 GPU）/ `--no-mmproj-offload`（放 CPU 省显存）），开启步骤：
+
+1. 下视觉塔 GGUF（两个来源任选）：
+   - `prism-ml/Ternary-Bonsai-2-27B-gguf` → `Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`（约 629 MB）/ `-mmproj-BF16.gguf`（约 931 MB）
+   - 或 prism.3 说明里给 KVMem 线推荐的那个：`mmproj-Qwen3.8-27B-Q5_K-MIX.gguf`（约 331 MiB）
+2. 启动加 `--mmproj <路径>`；显存紧张时加 `--no-mmproj-offload` 把编码器放 CPU
+3. 12GB 卡开视觉会进一步压缩可用显存，建议同时把 `-c` 或 GPU 窗口调小
+
+> 以上为按引擎参数与官方说明整理的步骤，**本机尚未实测**（想做的话说一声）。
 
 ---
 

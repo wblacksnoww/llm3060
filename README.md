@@ -395,7 +395,8 @@ cd ninfer-bonsai-4070ti
 **判断它在干活还是卡住**：
 
 ```bash
-tail -3 ~/kvmem-logs/kvmem-work.log
+tail -3 "$(ls -t ~/kvmem-logs/kvmem-*.log | head -1)"   # 自动挑最近在写的那个
+# 日志文件名跟档位走：work→kvmem-work.log，long→kvmem-long.log，别翻错文件
 ```
 
 一行日志怎么读（都是**毫秒**，`1384.52 ms` = 1.38 秒）：
@@ -413,6 +414,13 @@ tail -3 ~/kvmem-logs/kvmem-work.log
 **想做视频生成？** 12GB 卡能玩但只在"尝鲜档"（480p / 约 5 秒 / 每条十几分钟起步），
 选型、约束与施工步骤见 **[docs/本地视频生成-方案与约束.md](docs/本地视频生成-方案与约束.md)**。
 注意视频模型与文字模型**抢显存**，跑之前先 `./scripts/start-kvmem.sh stop`。
+
+**⚠️ 这套没有视觉能力**：启动参数里没有 `--mmproj`（视觉塔），所以**请求里带图片会直接失败**
+（日志出现 `multimodal_error: multimodal prefill failed or cancelled`，客户端表现为"一个 token 都不出"）。
+要用图片得另下视觉塔（`Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`，约 629 MB）并加
+`--mmproj <路径>`（可选 `--no-mmproj-offload` 把它放 CPU 省显存）。
+
+**打游戏前先停服务**：游戏和模型都要显存，12GB 不够分（实测见 §8 症状表）。
 
 ---
 
