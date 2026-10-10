@@ -308,23 +308,28 @@ total time = 1620 ms / 283 tokens                                           ← 
   在 30 GB 机器上已接近上限，跑长会话时别同时开别的吃内存的程序
 - **速度**：decode 34 t/s（MTP1 39~41）｜prefill 206~233 t/s（与上下文长度基本无关）
 
-### 8.6 想让它能看图（可选，未实测）
+### 8.6 看图（视觉）—— 已装好并实测
 
-本部署默认**没有视觉能力**（启动参数里没有 `--mmproj`），所以请求里带图片会直接失败：
+视觉塔：`models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`（0.63 GB，官方 Q8_0 包，
+sha256 `6807ede6…` 与 HF 一致）。**默认不挂**（纯文本时不占显存），要用就：
 
+```bash
+KVMEM_VISION=1 ./scripts/start-kvmem.sh long                      # 编码器放 GPU（默认）
+KVMEM_VISION=1 KVMEM_VISION_CPU=1 ./scripts/start-kvmem.sh long   # 放 CPU，省显存
 ```
-E srv  KVMEM_TRACE multimodal_error error=multimodal prefill failed or cancelled
-```
 
-引擎本身支持视觉（`--mmproj PATH` / `--mmproj-offload`（默认放 GPU）/ `--no-mmproj-offload`（放 CPU 省显存）），开启步骤：
+**本机实测（RTX 3060 12GB）**：
 
-1. 下视觉塔 GGUF（两个来源任选）：
-   - `prism-ml/Ternary-Bonsai-2-27B-gguf` → `Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf`（约 629 MB）/ `-mmproj-BF16.gguf`（约 931 MB）
-   - 或 prism.3 说明里给 KVMem 线推荐的那个：`mmproj-Qwen3.8-27B-Q5_K-MIX.gguf`（约 331 MiB）
-2. 启动加 `--mmproj <路径>`；显存紧张时加 `--no-mmproj-offload` 把编码器放 CPU
-3. 12GB 卡开视觉会进一步压缩可用显存，建议同时把 `-c` 或 GPU 窗口调小
+| 测试 | 结果 |
+|---|---|
+| 合成图（白底 + 左中下红圆 + 右上蓝方）首轮 | 76 s（含视觉编码器加载），描述**完全正确** |
+| 同一张图第二轮 | **2.2 s**（缓存命中） |
+| **中文表格截图**（1100×850，4 列） | **14.7 s**，4 列表头**逐字读对**（提示 2067 token） |
+| 显存 | 挂视觉后服务约 8.7 GiB（比纯文本 +0.6 GiB） |
 
-> 以上为按引擎参数与官方说明整理的步骤，**本机尚未实测**（想做的话说一声）。
+不挂视觉时发图会失败：`E srv KVMEM_TRACE multimodal_error error=multimodal prefill failed or cancelled`
+（客户端表现为"一个 token 都不出"）。模型卡提示视觉是三元气化后差距较集中的类别
+（MMMU-Pro 71.36），**读结构清晰的图表/截图可以，别指望精细图表推理**。
 
 ---
 

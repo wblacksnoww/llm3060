@@ -23,6 +23,7 @@
 #   KVMEM_CTX=262144     逻辑上下文顶到模型原生 256K（历史 KV 在内存，显存不变）
 #   KVMEM_RESERVE=4096   缩小单轮生成预留 → 给提示让出约 6K 空间（输出上限同步降到 4096）
 #   KVMEM_BUDGET=32768   加大 GPU 检索窗口（多吃显存）
+#   KVMEM_VISION=1       挂视觉塔，能看图（+KVMEM_VISION_CPU=1 把编码器放 CPU）
 # 例：KVMEM_CTX=262144 KVMEM_RESERVE=8192 ./scripts/start-kvmem.sh work
 #
 # 首次使用前先跑 scripts/build-kvmem-sm86.sh 准备引擎（免 root 工具链 + 编译）。
@@ -140,6 +141,20 @@ if [[ -r "$UI_DIR/index.html" ]]; then ARGS+=(--ui-dir "$UI_DIR"); fi
 # 生成/重生成：patches/apply-kvmem-compat.sh <model.gguf>
 TEMPLATE="$REPO/patches/bonsai-chat-template-alias.jinja"
 if [[ -r "$TEMPLATE" ]]; then ARGS+=(--chat-template-file "$TEMPLATE"); fi
+
+# 视觉塔（可选）：KVMEM_VISION=1 挂 --mmproj，让模型能看图（约 +0.63 GiB 权重，按需加载）。
+# 显存紧张时用 KVMEM_VISION_CPU=1 把视觉编码器放 CPU（慢一些但省显存）。
+VISION_ARGS=()
+VISION_MODEL="${KVMEM_VISION_MODEL:-$REPO/models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf}"
+if [[ "${KVMEM_VISION:-0}" == "1" ]]; then
+    if [[ -r "$VISION_MODEL" ]]; then
+        VISION_ARGS=(--mmproj "$VISION_MODEL")
+        [[ "${KVMEM_VISION_CPU:-0}" == "1" ]] && VISION_ARGS+=(--no-mmproj-offload)
+    else
+        echo "警告: KVMEM_VISION=1 但找不到视觉塔 $VISION_MODEL —— 本次不带视觉" >&2
+    fi
+fi
+ARGS+=("${VISION_ARGS[@]}")
 
 echo "启动 llama-kvmem-server | profile=$PROFILE | 端口=$PORT | 上下文=$CTX | GPU 窗口=$BUDGET+$RESERVE | KV=$KV"
 echo "日志: $LOGFILE"
