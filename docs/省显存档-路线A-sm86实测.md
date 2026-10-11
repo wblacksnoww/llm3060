@@ -368,6 +368,11 @@ KVMEM_PROXY=0 ./scripts/start-kvmem.sh long   # 只要引擎
 > 看代理日志 `est X→~Y` 与 `mode=compress|incremental|reuse` 判断是否生效；
 > 状态在 `~/.cache/kvmem-proxy-state.json`（按会话存，删掉即重置）。
 > 估算器对中文的偏差在 30% 以内（阈值已留余量）；拿不准就把阈值调小 20%。
+>
+> 🔧 **实现注意（别改回去）**：SSE 转发必须用 `resp.read1()` 而不是 `resp.read(4096)` ——
+> 后者（BufferedReader 语义）会**攒满 4096 字节才返回**，在 ~200 B/s 的出字速度下等于"憋 20~40 秒
+> 再一次性倒出来"：总耗时不变，但观感上明显变慢。已实测：`read1` 下经代理与直连的首事件
+> 一致（模拟流 1 ms；真机首字 67 ms vs 直连 490 ms，差值只是缓存热度）。
 
 ---
 

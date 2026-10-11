@@ -305,7 +305,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 while True:
-                    chunk = resp.read(4096)
+                    # 必须用 read1：read(n) 会攒满 n 字节才返回，SSE 会变成整块倒出
+                    chunk = resp.read1(8192)
                     if not chunk:
                         break
                     self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
