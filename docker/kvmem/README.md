@@ -105,6 +105,28 @@ docker run -d --name kvmem-3060 --gpus all --restart unless-stopped \
 
 **文件在同目录就自动启用**（`KVMEM_MTP=0` / `KVMEM_VISION=0` 可分别关掉）。
 
+**一条命令下载主模型**（走 hf-mirror 国内直连，实测 ~35 MB/s；SHA256 已与 HF 核对）：
+
+```bash
+curl -L --noproxy '*' -o models/Ternary-Bonsai-2-27B-PTQ1_0.gguf \
+  https://hf-mirror.com/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/main/Ternary-Bonsai-2-27B-PTQ1_0.gguf
+sha256sum models/Ternary-Bonsai-2-27B-PTQ1_0.gguf   # 期望 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3
+```
+
+可选两个（**放进同一个目录即自动启用**）：
+
+```bash
+# MTP 合并版（+15~22% 出字；合并方法见仓库 patches/）
+curl -L --noproxy '*' -o models/Ternary-Bonsai-2-27B-PTQ1_0-MTP-r3-Q4_0.gguf \
+  https://hf-mirror.com/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/main/Ternary-Bonsai-2-27B-PTQ1_0-MTP-r3-Q4_0.gguf 2>/dev/null || true
+# 视觉塔（能贴图）
+curl -L --noproxy '*' -o models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf \
+  https://hf-mirror.com/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/main/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
+```
+
+> MTP 合并版是用 `scripts`+`patches` 里的 graft 流程现场生成的（HF 上**没有**这个合并文件）⇒
+> 从零复现时先下**主模型**，再按仓库 `patches/` 的说明合并；只想直接跑就只下主模型即可。
+
 ## 3. 运行
 
 ```bash
