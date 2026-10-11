@@ -68,6 +68,18 @@ docker run -d --name kvmem-3060 --gpus all --restart unless-stopped \
 # 或把 docker-compose.kvmem.yml 里的 image: 换成上面的 GHCR 地址，再 compose up -d
 ```
 
+> **用 compose（含 VS Code 的 Docker 面板点 Compose Up）时，不用改文件**：
+> 在 `docker/kvmem/` 下放一个 `.env`，写一行即可（compose 会自动读同目录 `.env`，已验证）：
+>
+> ```
+> KVMEM_IMAGE=ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86
+> ```
+>
+> 不写就默认用本机构建出来的 `llama-kvmem-bonsai:cuda13.3-arch86` ✓。
+>
+> ⚠️ 注意：**不要只对镜像点 "Run"** —— 那样不会带模型挂载、端口、GPU 直通，容器会
+> 启动即退出（"缺模型"）或起来了也连不上。**起服务请走 compose 或上文的 `docker run` 完整命令。**
+
 **"拉下来"不等于"直接能用"** —— 三件前置：
 
 | 前置 | 说明 |

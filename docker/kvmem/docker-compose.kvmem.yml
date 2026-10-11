@@ -4,13 +4,21 @@
 #   docker compose -f docker/kvmem/docker-compose.kvmem.yml up -d      # 起
 #   docker compose -f docker/kvmem/docker-compose.kvmem.yml logs -f    # 看日志
 #   docker compose -f docker/kvmem/docker-compose.kvmem.yml down       # 停
+#   （VS Code 的 Docker 面板也可以直接对这个文件 Compose Up —— 等价于跑上面第一条）
 #
-# 前置：镜像已构建（./docker/build-kvmem-image.sh），模型已就位（models/*.gguf）
+# 前置：镜像已就位 + 模型已就位（models/*.gguf）
+#
+# 用哪张镜像：
+#   · 本机构建（默认）        → 不用设置，用下面的默认标签
+#   · 从 GHCR 拉取的（CI 产物）→ 在本文件同目录放一个 .env，写一行：
+#         KVMEM_IMAGE=ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86
+#     （compose 会自动读同目录 .env；VS Code 的 Compose Up 同样生效）
+#
 # 客户端接 http://127.0.0.1:18210/v1 （压缩代理；18202 是引擎直连，一般不用）
 # =============================================================================
 services:
   kvmem-3060:
-    image: llama-kvmem-bonsai:cuda13.3-arch86
+    image: ${KVMEM_IMAGE:-llama-kvmem-bonsai:cuda13.3-arch86}
     container_name: kvmem-3060
     restart: unless-stopped
     ports:
