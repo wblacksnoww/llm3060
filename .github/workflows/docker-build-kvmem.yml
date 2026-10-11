@@ -16,6 +16,7 @@ on:
     branches: [main]
     paths:
       - "docker/kvmem/**"
+      - "!docker/kvmem/**/*.md"          # 只改文档不必重建镜像（35 分钟）
       - "docker/build-kvmem-image.sh"
       - "scripts/kvmem-proxy.py"
       - "patches/**"
