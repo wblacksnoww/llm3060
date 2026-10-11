@@ -40,13 +40,35 @@ TAG="${TAG:-llama-kvmem-bonsai:cuda${CUDASHORT}-arch${ARCH}}"
 
 DOCKER="docker"; docker info >/dev/null 2>&1 || DOCKER="sudo docker"
 
-# 只把需要的文件放进构建上下文（避免把 8 GB 的 models/ 整个塞进去）
+# 只把需要的文件放进构建上下文（避免把 8 GB 的 models/ 整个塞进去）：
+#   上下文根/ Dockerfile                          ← docker build 默认只认根目录的 Dockerfile
+#   上下文根/docker/kvmem/docker-entrypoint.sh    ← 与 Dockerfile 里的 COPY 路径一一对应
+#   上下文根/scripts/kvmem-proxy.py
+#   上下文根/patches/bonsai-chat-template-alias.jinja
 CTX="$(mktemp -d /tmp/kvmem-docker-ctx.XXXXXX)"
 trap 'rm -rf "$CTX"' EXIT
 mkdir -p "$CTX/docker/kvmem" "$CTX/scripts" "$CTX/patches"
-cp "$ROOT/docker/kvmem/Dockerfile" "$ROOT/docker/kvmem/docker-entrypoint.sh" "$CTX/docker/kvmem/"
+cp "$ROOT/docker/kvmem/Dockerfile" "$CTX/Dockerfile"
+cp "$ROOT/docker/kvmem/docker-entrypoint.sh" "$CTX/docker/kvmem/"
 cp "$ROOT/scripts/kvmem-proxy.py" "$CTX/scripts/"
 cp "$ROOT/patches/bonsai-chat-template-alias.jinja" "$CTX/patches/"
+
+# 构建前自检：Dockerfile 必须在上下文根，且它 COPY 的每个文件都要在
+missing=0
+for f in "Dockerfile" "docker/kvmem/docker-entrypoint.sh" "scripts/kvmem-proxy.py" "patches/bonsai-chat-template-alias.jinja"; do
+    if [[ -f "$CTX/$f" ]]; then
+        echo "   [ctx] $f  ($(wc -c < "$CTX/$f") 字节)"
+    else
+        echo "   [ctx] 缺 $f" >&2; missing=1
+    fi
+done
+[[ "$missing" == "0" ]] || { echo "错误: 构建上下文不完整，已中止（先修脚本再跑）" >&2; exit 1; }
+
+# 干跑模式：只准备上下文并打印清单，不调用 docker（CI/无 docker 环境可用来自检）
+if [[ "${KVMEM_DRY_RUN:-0}" == "1" ]]; then
+    echo ">> KVMEM_DRY_RUN=1：上下文已就绪，跳过 docker build。清理后退出。"
+    exit 0
+fi
 
 echo ">> docker build（${BASE} , arch=${ARCH} , 并行=${JOBS} , 国内源=${MIRROR}）→ $TAG"
 $DOCKER build \

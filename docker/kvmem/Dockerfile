@@ -41,11 +41,20 @@ RUN set -eux; \
         build-essential git ca-certificates cmake ninja-build libssl-dev pkg-config; \
     rm -rf /var/lib/apt/lists/*
 
+# 早期自检：确认镜像内 CUDA 运行库的位置/版本（布局变了就在几秒内报错，
+# 而不是等编译 20 分钟后才在下面的 COPY 阶段失败）
+RUN ls -1 /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.13* \
+          /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.13* \
+          /usr/local/cuda/targets/x86_64-linux/lib/libcublasLt.so.13* > /dev/null \
+ && echo "CUDA 运行库路径自检 OK"
+
 WORKDIR /src
 # 部分克隆 + 按 revision 检出：可复现（不随分支前进漂移），也不需要完整历史
+# 子模块先试 --depth 1（快）；若服务器不允许按固定 sha 浅取则退回完整克隆
 RUN git clone --filter=blob:none --no-checkout "$KVMEM_REPO" /src \
  && git -C /src checkout --quiet "$KVMEM_REV" \
- && git -C /src submodule update --init --recursive --depth 1 \
+ && ( git -C /src submodule update --init --recursive --depth 1 \
+      || git -C /src submodule update --init --recursive ) \
  && ( [ "$(git -C /src/llama.cpp rev-parse HEAD)" = "$LLAMA_REV" ] \
       || echo "注意: llama.cpp 子模块 revision 与 pin($LLAMA_REV) 不同（上游可能已前进）" )
 
