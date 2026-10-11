@@ -388,9 +388,15 @@ cd ninfer-bonsai-4070ti
 
 **接客户端（ZCode / Chatbox 等）**：Base URL 填 `http://127.0.0.1:18202/v1`，API Key 随便填，
 模型名随便填。**第一次接之前先跑一次** `./patches/apply-kvmem-compat.sh models/Ternary-Bonsai-2-27B-PTQ1_0.gguf`
-——客户端默认发的 `reasoning_effort:"high"` 不在模板允许值里，会整轮 400（修复不需要重编引擎，
-`start-kvmem.sh` 会自动挂上生成的模板）。ZCode 实测：首轮约 100 秒（2.2 万 token 系统提示 + 33 个工具），
-**第二轮起 1~2 秒**。
+—— 它会给模型自带的聊天模板打两个兼容补丁，修掉两类"整轮 400"（都不需要重编引擎，
+`start-kvmem.sh` 会自动挂上生成的模板）：
+
+| 客户端行为 | 模板报错（服务端原文） | 补丁做了什么 |
+|---|---|---|
+| 发 `reasoning_effort:"high"`（ZCode 默认） | `Unexpected reasoning effort high. Supported types are xhigh…` | high/max→xhigh、minimal→low、未知→xhigh |
+| 把技能清单/环境提醒当 **system 消息插在会话中间**（ZCode 实测在 messages[3]） | `System message must be at the beginning.`（**53 毫秒秒拒**） | 非首条 system 消息按 user 轮渲染，内容保留 |
+
+ZCode 实测：首轮约 100 秒（2.2 万 token 系统提示 + 33 个工具），**第二轮起 1~2 秒**。
 
 **判断它在干活还是卡住**：
 

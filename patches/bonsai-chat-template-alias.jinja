@@ -109,7 +109,8 @@
     {%- set content = render_content(message.content, true)|trim %}
     {%- if message.role == "system" %}
         {%- if not loop.first %}
-            {{- raise_exception('System message must be at the beginning.') }}
+            {#- sm86 兼容补丁：会话中途的 system 消息（ZCode 的技能清单提醒等）按 user 轮渲染，不再抛异常 #}
+            {{- '<|im_start|>user\n' + content + '<|im_end|>\n' }}
         {%- endif %}
     {%- elif message.role == "user" %}
         {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>' + '\n' }}

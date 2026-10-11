@@ -228,6 +228,7 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 | 6 | 长 prompt 下 decode 偏低（27 t/s） | 短输出样本（8 token）被每轮固定开销主导 —— **测速要看 ≥300 token 的长输出**（报告里"短输出伪造低接受率"的同源教训） |
 | 7 | 接 ZCode/客户端后整轮 400：`Unexpected reasoning effort high` | 客户端发 `reasoning_effort:"high"`，模板只认 xhigh/medium/low，模板抛异常 ⇒ 挂别名模板（`patches/apply-kvmem-compat.sh` + `--chat-template-file`），**不用重编**。注意：关掉思考时该字段不校验，所以只有"思考开"的客户端才会踩到 |
 | 8 | 长会话某轮开始稳定 400：`{"error":"prompt + max_tokens exceeds n_ctx"}` | **上下文用满**：提示 token + 单轮预留（10240）> `-c`(131072)，上限其实是 **120832** 个提示 token。这是校验期秒拒（不是超时）。处置：新开会话；或 `KVMEM_RESERVE=4096`（让出约 6K 提示空间，输出上限同步降）；或 `KVMEM_CTX=262144` 顶到模型原生 256K（KV 在主机内存，显存不变，超长召回属官方实验特性）|
+| 9 | 整轮 400（**53 ms 秒拒**）：`System message must be at the beginning.` | 客户端把系统提醒作为 **system 角色消息插在会话中间**（ZCode 的技能清单实测出现在 messages[3]），模板要求 system 只能在首条。处置：`patches/apply-kvmem-compat.sh`（补丁2）把非首条 system 按 user 轮渲染；**跟图片/长度/缓存无关**，别被带偏 |
 
 ---
 
@@ -269,7 +270,8 @@ Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (de
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| 整轮 400：`Unexpected reasoning effort high` | 客户端发 `high`，模板只认 xhigh/medium/low | 跑 `patches/apply-kvmem-compat.sh`（生成别名模板）；`start-kvmem.sh` 自动挂 |
+| 整轮 400：`Unexpected reasoning effort high` | 客户端发 `high`，模板只认 xhigh/medium/low | 跑 `patches/apply-kvmem-compat.sh`（补丁1）；`start-kvmem.sh` 自动挂 |
+| 整轮 400（**53 ms 秒拒**）：`System message must be at the beginning.` | 客户端把系统提醒当 **system 消息插在会话中间**（ZCode 的 skills 清单实测在 messages[3]） | 同上脚本（补丁2：中途 system 按 user 轮渲染）；**与图片、长度、缓存都无关** |
 | 整轮 400：`prompt + max_tokens exceeds n_ctx` | 会话把上下文用满（提示 > ctx − reserve） | 新开会话 / `KVMEM_RESERVE=4096` / 用 `long` 档 |
 | 界面长时间没动静 | ① 在预填充（日志 `progress` 在涨）② 思考 token 都在"内心独白"里 | 看日志；关客户端思考（`chat_template_kwargs.enable_thinking=false`） |
 | 每轮都要好几分钟 | 缓存没命中（`cache = 0`），每次全量重算 | 若因重启导致：等它跑完一次即可恢复；若是会话过大：新开会话 |

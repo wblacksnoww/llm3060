@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# KVMem 线（路线 A）兼容补丁：reasoning_effort 别名归一
+# KVMem 线（路线 A）兼容补丁：把模型自带聊天模板改成"客户端友好"版本
 #
-# 问题（本机实测，2026-10-03）:
-#   模型自带聊天模板只接受 reasoning_effort ∈ {xhigh, medium, low}，其它值直接
-#   raise_exception → HTTP 400。而 OpenAI 系客户端默认发 "high"——
-#   ZCode 就发 {"reasoning_effort":"high","enable_thinking":true}，
-#   于是整轮对话被 400 拒掉：
+# 用不重编引擎的方式（挂 --chat-template-file）修两类真实踩到的 400：
+#
+# 【补丁 1】reasoning_effort 别名归一
+#   模型模板只接受 xhigh/medium/low，而 OpenAI 系客户端默认发 "high"
+#   （ZCode 发 {"reasoning_effort":"high","enable_thinking":true}）→ 模板抛异常：
 #     Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh...
+#   映射：high/max/maximum/highest→xhigh；minimal/min/lowest→low；未知→xhigh。
+#   （与 ninfer 线 patches/apply-compat.sh 的 P1 同类问题，那边改 translate.cpp。）
 #
-# 修法（不用重编引擎）:
-#   从 GGUF 抽出 tokenizer.chat_template，插入一段别名归一逻辑，存成 .jinja，
-#   启动时挂 --chat-template-file <该文件>。
-#   映射: high/max/maximum/highest → xhigh；minimal/min/lowest → low；其余未知 → xhigh。
-#   （与 ninfer 线的 patches/apply-compat.sh P1 是同一类修复：那边改 translate.cpp，
-#     这边只换模板。）
+# 【补丁 2】会话中途的 system 消息
+#   ZCode 会把技能清单/环境提醒作为 system 角色消息插在对话中间（实测出现在
+#   messages[3]），而模型模板要求 system 必须在首条，否则抛异常：
+#     Jinja Exception: System message must be at the beginning.
+#   → 表现为 53 ms 秒拒、整轮 400（与图片、长度、缓存都无关）。
+#   处置：把非首条的 system 消息按 user 轮渲染（内容保留，模型仍能看到），不再抛异常。
 #
 # 用法:
 #   ./apply-kvmem-compat.sh <某个 .gguf> [输出 .jinja]
-#   默认输出: patches/bonsai-chat-template-alias.jinja
+#   默认输出: patches/bonsai-chat-template-alias.jinja（start-kvmem.sh 会自动挂上）
 # =============================================================================
 set -euo pipefail
 
@@ -64,24 +66,48 @@ for _ in range(n_kv):
 if tmpl is None:
     raise SystemExit('该 GGUF 没有 tokenizer.chat_template')
 
-anchor = "{%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}"
-if anchor not in tmpl:
-    raise SystemExit('模板结构与预期不符（找不到 effort 锚点），请人工确认后再打')
-if 'sm86 兼容补丁' in tmpl:
-    print('模板已含别名补丁，直接写出')
-    patched = tmpl
-else:
-    patch = anchor + """
+report = []
+
+# ---- 补丁 1：reasoning_effort 别名 ----
+anchor1 = "{%- set resolved_reasoning_effort = reasoning_effort|default('xhigh') %}"
+patch1 = anchor1 + """
     {#- sm86 兼容补丁：客户端常见 high/max/minimal 等写法（ZCode 发 high）-> 归一 #}
     {%- if resolved_reasoning_effort in ('high', 'max', 'maximum', 'highest') %}{%- set resolved_reasoning_effort = 'xhigh' %}
     {%- elif resolved_reasoning_effort in ('minimal', 'min', 'lowest') %}{%- set resolved_reasoning_effort = 'low' %}
     {%- elif resolved_reasoning_effort in ('mid', 'default', 'auto') %}{%- set resolved_reasoning_effort = 'medium' %}
     {%- elif resolved_reasoning_effort not in ('xhigh', 'medium', 'low') %}{%- set resolved_reasoning_effort = 'xhigh' %}
     {%- endif %}"""
-    patched = tmpl.replace(anchor, patch, 1)
+if 'resolved_reasoning_effort in (\'high\'' in tmpl:
+    report.append('补丁1 已存在（跳过）')
+elif anchor1 in tmpl:
+    tmpl = tmpl.replace(anchor1, patch1, 1)
+    report.append('补丁1 已应用（reasoning_effort 别名）')
+else:
+    raise SystemExit('模板结构与预期不符（找不到 effort 锚点），请人工确认后再打')
 
-open(out, 'w', encoding='utf-8').write(patched)
-print(f'已写出 {out}（{len(patched)} 字符）')
+# ---- 补丁 2：会话中途的 system 消息 -> 按 user 轮渲染 ----
+anchor2 = """    {%- if message.role == "system" %}
+        {%- if not loop.first %}
+            {{- raise_exception('System message must be at the beginning.') }}
+        {%- endif %}"""
+patch2 = """    {%- if message.role == "system" %}
+        {%- if not loop.first %}
+            {#- sm86 兼容补丁：会话中途的 system 消息（ZCode 的技能清单提醒等）按 user 轮渲染，不再抛异常 #}
+            {{- '<|im_start|>user\\n' + content + '<|im_end|>\\n' }}
+        {%- endif %}"""
+if "System message must be at the beginning" not in tmpl:
+    report.append('补丁2 已存在（跳过）')
+elif anchor2 in tmpl:
+    tmpl = tmpl.replace(anchor2, patch2, 1)
+    report.append('补丁2 已应用（中途 system 消息按 user 渲染）')
+else:
+    raise SystemExit('补丁2 锚点不匹配（模板结构变了），请人工确认')
+
+open(out, 'w', encoding='utf-8').write(tmpl)
+for r in report:
+    print(' ', r)
+print(f'已写出 {out}（{len(tmpl)} 字符）')
 PY
 
-echo "启动时挂上: KVMEM_MTP=1 ./scripts/start-kvmem.sh work   # start-kvmem.sh 会自动带 --chat-template-file"
+echo "启动时挂上（start-kvmem.sh 会自动带 --chat-template-file）:"
+echo "  ./scripts/start-kvmem.sh long"
