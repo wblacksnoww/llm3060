@@ -124,6 +124,7 @@ curl -s --noproxy '*' http://127.0.0.1:18202/v1/chat/completions -H 'Content-Typ
 | 客户端整轮 400 `System message must be at the beginning` | 同上（兼容模板的补丁 2） |
 | 看着"没输出"、日志在跑 `prompt processing … progress=` | 在预填充，等它跑完；**中途不要重发**（会从头开始） |
 | 出字一块一块蹦 | 压缩代理的 SSE 转发必须用 `read1`（镜像内已修；改代码时别改回落 `read`） |
+| 容器与宿主**互相切换**后，后起的一方报 `cannot bind 127.0.0.1:18202` | 上一位占用者的连接还在 **TIME-WAIT**（引擎用 httplib，未开 SO_REUSEADDR）⇒ **等约 60 秒**再起，或让两者用不同端口（容器可映射到 18302/18310） |
 
 引擎与代理日志：`docker compose … logs -f`（代理的摘要状态在 `kvmem-proxy-state` 卷里，
 删卷即重置记忆）。
