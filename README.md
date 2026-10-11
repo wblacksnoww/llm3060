@@ -427,9 +427,18 @@ tail -3 "$(ls -t ~/kvmem-logs/kvmem-*.log | head -1)"   # 自动挑最近在写�
 | `n_gen = ..., tg = xx t/s` | 正在出字 |
 | 日志完全不动 | 这才叫卡住 |
 
-**想用容器跑这条线**（换机器、隔离环境）：镜像与用法见 **[docker/kvmem/README.md](docker/kvmem/README.md)**
-—— 默认架构 sm_86、镜像内含引擎 + 上下文压缩代理，模型只读挂载即可；
-CI 也会自动构建并推送 `ghcr.io/<owner>/llama-kvmem-bonsai:cuda13.3-arch86`。
+**想用容器跑这条线**（换机器、隔离环境）—— **两种拿镜像的方式，任选**：
+
+| 方式 | 怎么做 | 要编译吗 |
+|---|---|---|
+| ① **直接从 CI 拉编好的镜像**（推荐；别的机器零依赖） | `docker pull ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86`<br>（包默认私有：先 `docker login ghcr.io`，或网页把它设为 Public） | ❌ **不用** |
+| ② 本机自建 | `./docker/build-kvmem-image.sh`（约 15 分钟） | ✅ |
+
+两种方式都还需要三样**镜像里没有**的东西：**模型**（放进 `models/`，镜像不含权重）、
+**NVIDIA 驱动 + nvidia-container-toolkit**、**架构匹配**（`arch86` 只能 RTX 30 系）。
+镜像内含引擎（sm_86 已编好）+ CUDA 用户态库 + 压缩代理 + 客户端兼容模板；
+起服务用 `docker compose -f docker/kvmem/docker-compose.kvmem.yml up -d`
+（拉来的镜像只需在同目录放一行 `.env` 指过去）。细节见 **[docker/kvmem/README.md](docker/kvmem/README.md)**。
 （注意：`docker/` 下那套 ninfer 镜像只支持 sm_89/120a，与 30 系无关。）
 
 **想做视频生成？** 12GB 卡能玩但只在"尝鲜档"（480p / 约 5 秒 / 每条十几分钟起步），
