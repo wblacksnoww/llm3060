@@ -122,10 +122,12 @@ COPY patches/bonsai-chat-template-alias.jinja /opt/kvmem/bonsai-chat-template-al
 RUN chmod +x /opt/kvmem/docker-entrypoint.sh
 
 ENV LD_LIBRARY_PATH=/opt/cuda/lib:/opt/kvmem/bin \
-    KVMEM_MODEL=/models/Ternary-Bonsai-2-27B-PTQ1_0.gguf \
     KVMEM_TEMPLATE=/opt/kvmem/bonsai-chat-template-alias.jinja \
     KVMEM_ENGINE_PORT=18202 \
     KVMEM_PROXY_PORT=18210
+# 注意：这里**不要**设 ENV KVMEM_MODEL —— 它会被入口脚本误判为"用户显式指定了模型"，
+# 从而跳过"自动切到 MTP 合并版模型"的逻辑（实测踩过：投机开关开了但模型没换，报
+# "model doesn't contain MTP layers"）。模型路径的默认值由入口脚本给。
 
 # 18202 = 引擎直连；18210 = 上下文压缩代理（客户端应接这个）
 EXPOSE 18202 18210

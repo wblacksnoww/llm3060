@@ -32,7 +32,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = "127.0.0.1"
+HOST = os.environ.get("KVMEM_PROXY_HOST", "127.0.0.1")   # 容器里需要 0.0.0.0（否则宿主端口映射够不着）
 PORT = int(os.environ.get("KVMEM_PROXY_PORT", "18210"))
 UP_HOST = "127.0.0.1"
 UP_PORT = int(os.environ.get("KVMEM_PROXY_UPSTREAM_PORT", "18202"))

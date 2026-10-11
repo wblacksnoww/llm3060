@@ -12,10 +12,13 @@
 #   KVMEM_VISION=1                   有视觉塔就自动开（KVMEM_VISION_CPU=1 编码器放 CPU）
 #   KVMEM_PROXY=1                    起上下文自动压缩代理（0 关）
 #   KVMEM_PROXY_THRESHOLD=45000      代理触发压缩的估算 token 阈值
+#   KVMEM_NGL=99                     卸载到 GPU 的层数（99=全部；0=纯 CPU，用于不带显卡的自检）
 #   KVMEM_ENGINE_PORT=18202 / KVMEM_PROXY_PORT=18210
 # =============================================================================
 set -euo pipefail
 
+# 记下用户是否显式指定了模型（决定后面能不能自动切到 MTP 合并版）
+MODEL_EXPLICIT="${KVMEM_MODEL:-}"
 : "${KVMEM_MODEL:=/models/Ternary-Bonsai-2-27B-PTQ1_0.gguf}"
 : "${KVMEM_CTX:=131072}"
 : "${KVMEM_RESERVE:=10240}"
@@ -26,6 +29,7 @@ set -euo pipefail
 : "${KVMEM_REASONING_BUDGET:=4096}"
 
 BIN=/opt/kvmem/bin/llama-kvmem-server
+MODEL="$KVMEM_MODEL"
 MODEL_DIR="$(dirname "$KVMEM_MODEL")"
 
 [[ -x "$BIN" ]] || { echo "镜像内缺引擎: $BIN" >&2; exit 1; }
@@ -39,10 +43,15 @@ MODEL_DIR="$(dirname "$KVMEM_MODEL")"
 MTP="$MODEL_DIR/Ternary-Bonsai-2-27B-PTQ1_0-MTP-r3-Q4_0.gguf"
 MMPROJ="$MODEL_DIR/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
 
+# 注意：开投机必须**换用合并了 MTP 头的模型**，只加 --spec-type 会报
+#   "model doesn't contain MTP layers"（实测踩过）
 SPEC=(--spec-type none); MTP_STATE=关
 if [[ "${KVMEM_MTP:-1}" != "0" && -r "$MTP" ]]; then
-    SPEC=(--spec-type draft-mtp --spec-draft-n-max "${KVMEM_DRAFT_N:-1}" --spec-kv-dtype f16)
-    MTP_STATE="开(MTP${KVMEM_DRAFT_N:-1})"
+    if [[ -z "$MODEL_EXPLICIT" || "$MODEL" == *MTP* ]]; then
+        MODEL="$MTP"
+        SPEC=(--spec-type draft-mtp --spec-draft-n-max "${KVMEM_DRAFT_N:-1}" --spec-kv-dtype f16)
+        MTP_STATE="开(MTP${KVMEM_DRAFT_N:-1})"
+    fi
 fi
 
 VISION=(); VISION_STATE=关
@@ -57,16 +66,19 @@ TEMPLATE=()
 
 # ---- 上下文自动压缩代理（默认开）：客户端接 $KVMEM_PROXY_PORT ----
 if [[ "${KVMEM_PROXY:-1}" != "0" ]]; then
+    KVMEM_PROXY_HOST="${KVMEM_PROXY_HOST:-0.0.0.0}" \
     KVMEM_PROXY_PORT="$KVMEM_PROXY_PORT" \
     KVMEM_PROXY_UPSTREAM_PORT="$KVMEM_ENGINE_PORT" \
     KVMEM_PROXY_THRESHOLD="${KVMEM_PROXY_THRESHOLD:-45000}" \
     python3 /opt/kvmem/kvmem-proxy.py &
 fi
+# 注：容器内代理必须绑 0.0.0.0，否则宿主 -p 端口映射（转发到容器网卡）够不着它；
+# 宿主直跑时代理的默认绑定仍是 127.0.0.1（见 scripts/kvmem-proxy.py 的 KVMEM_PROXY_HOST）。
 
-echo "llama-kvmem-server 启动 | 引擎 :$KVMEM_ENGINE_PORT ｜ 压缩代理 :$KVMEM_PROXY_PORT ｜ 上下文=$KVMEM_CTX ｜ GPU 窗口=$KVMEM_BUDGET+$KVMEM_RESERVE ｜ KV=$KVMEM_KV ｜ 视觉=$VISION_STATE ｜ 投机=$MTP_STATE"
+echo "llama-kvmem-server 启动 | 模型=$(basename "$MODEL") ｜ 引擎 :$KVMEM_ENGINE_PORT ｜ 压缩代理 :$KVMEM_PROXY_PORT ｜ 上下文=$KVMEM_CTX ｜ GPU 窗口=$KVMEM_BUDGET+$KVMEM_RESERVE ｜ KV=$KVMEM_KV ｜ 视觉=$VISION_STATE ｜ 投机=$MTP_STATE"
 
 exec "$BIN" \
-    -m "$KVMEM_MODEL" -ngl 99 --host 0.0.0.0 --port "$KVMEM_ENGINE_PORT" \
+    -m "$MODEL" -ngl "${KVMEM_NGL:-99}" --host 0.0.0.0 --port "$KVMEM_ENGINE_PORT" \
     -c "$KVMEM_CTX" -b 128 --ubatch-size 128 -n "$KVMEM_RESERVE" \
     --kvmem-budget "$KVMEM_BUDGET" --kvmem-gen-reserve "$KVMEM_RESERVE" --kvmem-block-tokens 128 \
     --kv-dtype "$KVMEM_KV" "${SPEC[@]}" --kvmem-mtp-state snapshots \
