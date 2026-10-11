@@ -1,0 +1,52 @@
+# =============================================================================
+# 自动打包：push 触达 docker/ 或 vendor/ 时自动构建容器镜像并发布到 GHCR
+# （镜像 = vendor 源码容器内编译；无需任何本地构建环境）
+#
+# 产物：ghcr.io/<owner>/ninfer-bonsai:cuda13.3-arch89 （RTX 40 系）
+#
+# 2026-09-27 深夜 A3 更新：vendor 升级为 pkg2 r12 树（A3 引擎），device.h 参数化
+#   NINFER_SM_COUNT 且恢复 SM120 分支 → arch89 与 120a 均可编译（120a 由 CI 实测验证）。
+#   账本 bug 已在 r12 修复：服务不再需要 --no-prefix-reuse（旧树回滚时才要加回）。
+# =============================================================================
+name: docker-build
+
+on:
+  push:
+    branches: [main]
+    paths: ["docker/**", "vendor/**", ".github/workflows/docker-build.yml"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cuda_arch: ["89", "120a"]   # A3 树 device.h 已含 SM120 分支，120a 恢复（CI 即验证）
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 释放磁盘空间（runner 预装组件约 25GB，CUDA 镜像需要）
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghc || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: 构建镜像（容器内编译，CUDA_ARCH=${{ matrix.cuda_arch }}）
+        env:
+          NINFER_JOBS: "3"   # runner 4 核 16GB，比本机更保守，防 nvcc OOM/ICE
+        run: ./docker/build-image.sh -a "${{ matrix.cuda_arch }}"
+
+      - name: 登录 GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: 推送 GHCR
+        run: |
+          IMG="ghcr.io/${{ github.repository_owner }}/ninfer-bonsai"
+          docker tag "ninfer-bonsai:cuda13.3-arch${{ matrix.cuda_arch }}" "$IMG:cuda13.3-arch${{ matrix.cuda_arch }}"
+          docker push "$IMG:cuda13.3-arch${{ matrix.cuda_arch }}"
