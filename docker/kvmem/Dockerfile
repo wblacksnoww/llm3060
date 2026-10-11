@@ -60,10 +60,28 @@ RUN git clone --filter=blob:none --no-checkout "$KVMEM_REPO" /src \
 
 RUN ./scripts/apply-patches.sh
 
-# 与本机验证过的编译命令逐条一致（arch 用 <N>-real，只出真实架构、不生成 PTX）
+# CUDA devel 镜像**不含驱动库** libcuda.so（驱动由 nvidia-container-toolkit 在运行时注入）；
+# 而 libggml-cuda.so 会 NEEDED libcuda.so.1，链接可执行文件时解析不到就会失败：
+#   /usr/bin/ld: warning: libcuda.so.1, needed by libggml-cuda.so, not found
+#   /usr/bin/ld: libggml-cuda.so: undefined reference to `cuMemRelease'
+# 用镜像自带的驱动 API 桩（stubs/libcuda.so）生成 libcuda.so.1 供链接期使用；
+# 桩只进构建阶段、不进最终镜像 —— 运行时由 nvidia-container-toolkit 提供真驱动。
+RUN set -eux; \
+    mkdir -p /opt/cuda-stub; \
+    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /opt/cuda-stub/libcuda.so.1; \
+    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /opt/cuda-stub/libcuda.so; \
+    echo /opt/cuda-stub > /etc/ld.so.conf.d/zz-cuda-stub.conf; \
+    ldconfig; \
+    ls -l /opt/cuda-stub/; ls -l /usr/local/cuda/lib64/stubs/ | head -8
+ENV LIBRARY_PATH=/opt/cuda-stub
+
+# 与本机验证过的编译命令逐条一致（arch 用 <N>-real，只出真实架构、不生成 PTX）；
+# 额外给链接器指到驱动桩目录（-rpath-link 用于解析共享库的传递依赖）
 RUN cmake -S /src -B /src/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}-real" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/opt/cuda-stub -L/opt/cuda-stub" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/opt/cuda-stub -L/opt/cuda-stub" \
         -DGGML_CUDA=ON \
         -DKVMEM_BUILD_LLAMA=ON \
         -DLLAMA_KVMEM=ON \
@@ -76,10 +94,23 @@ RUN ninja -C /src/build -j"${KVMEM_JOBS}" llama-kvmem-server llama-kvmem-cli
 # 驱动 libcuda.so.1 由宿主经 nvidia-container-toolkit 注入（--gpus all / compose devices）
 FROM ubuntu:24.04 AS runtime
 
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
-      libstdc++6 libgomp1 libssl3t64 zlib1g libzstd1 python3 ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# 注意顺序：裸 ubuntu 镜像不带 ca-certificates，直接切 https 国内源会证书验证失败
+#   （Certificate verification failed / No system certificates available）
+# 所以先用默认源装 ca-certificates，再按需切源（USE_MIRROR=1 时）。
+ARG USE_MIRROR=0
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends ca-certificates; \
+    if [ "$USE_MIRROR" = "1" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
+            [ -f "$f" ] || continue; \
+            sed -i 's|http://archive.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' "$f"; \
+        done; \
+        apt-get update; \
+    fi; \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+      libstdc++6 libgomp1 libssl3t64 zlib1g libzstd1 python3; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.13*   /opt/cuda/lib/
 COPY --from=build /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.13*   /opt/cuda/lib/

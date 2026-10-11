@@ -8,6 +8,9 @@
 #   ./docker/build-kvmem-image.sh -b nvidia/cuda:<13.2.x>-devel-ubuntu24.04 # 贴合作者工具链基线（tag 以 Docker Hub 为准）
 #   ./docker/build-kvmem-image.sh -m 1                  # 国内构建（apt 走清华源）
 #   ./docker/build-kvmem-image.sh -j 3                  # nvcc 并行度（默认 6；runner 4 核建议 3）
+#   ./docker/build-kvmem-image.sh -n host               # 构建容器与宿主同网（国内走宿主代理时必加）
+#   ./docker/build-kvmem-image.sh -n host -p http://127.0.0.1:10808   # 显式指定构建容器代理
+#   KVMEM_DRY_RUN=1 ./docker/build-kvmem-image.sh       # 干跑：只准备上下文并自检，不调 docker
 #
 # 前置:
 #   · docker 可用（不在 docker 组时脚本自动改用 sudo）
@@ -23,19 +26,24 @@ BASE=nvidia/cuda:13.3.0-devel-ubuntu24.04
 JOBS="${KVMEM_JOBS:-6}"
 MIRROR=0
 TAG=""
-while getopts "a:b:j:m:t:" o; do case "$o" in
+NETWORK=""
+PROXYARG=""
+while getopts "a:b:j:m:t:n:p:" o; do case "$o" in
     a) ARCH="$OPTARG" ;;
     b) BASE="$OPTARG" ;;
     j) JOBS="$OPTARG" ;;
     m) MIRROR="$OPTARG" ;;
     t) TAG="$OPTARG" ;;
+    n) NETWORK="$OPTARG" ;;   # 构建网络：host = 构建容器与宿主同网（国内走宿主代理时用它）
+    p) PROXYARG="$OPTARG" ;;  # 显式指定构建容器用的 http(s) 代理
     *) grep '^#' "$0" | sed -n '2,16p'; exit 1 ;;
 esac; done
 
 [[ "$ARCH" =~ ^(86|89|120a)$ ]] || { echo "错误: -a 只能是 86（RTX 30 系）/ 89（40 系）/ 120a（50 系）" >&2; exit 1; }
 command -v docker >/dev/null || { echo "错误: 需要 docker" >&2; exit 1; }
-CUDASHORT="$(echo "$BASE" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?$' | cut -d. -f1,2 || true)"
-[[ -n "$CUDASHORT" ]] || { echo "错误: -b 需为 nvidia/cuda:<版本> 形式" >&2; exit 1; }
+# 从 nvidia/cuda:<版本>-<变体> 里取 <版本> 的前两段（如 13.3.0-devel-ubuntu24.04 → 13.3）
+CUDASHORT="$(echo "${BASE#*:}" | cut -d- -f1 | grep -oE '^[0-9]+\.[0-9]+' || true)"
+[[ -n "$CUDASHORT" ]] || { echo "错误: -b 需为 nvidia/cuda:<版本> 形式（如 nvidia/cuda:13.3.0-devel-ubuntu24.04）" >&2; exit 1; }
 TAG="${TAG:-llama-kvmem-bonsai:cuda${CUDASHORT}-arch${ARCH}}"
 
 DOCKER="docker"; docker info >/dev/null 2>&1 || DOCKER="sudo docker"
@@ -71,7 +79,24 @@ if [[ "${KVMEM_DRY_RUN:-0}" == "1" ]]; then
 fi
 
 echo ">> docker build（${BASE} , arch=${ARCH} , 并行=${JOBS} , 国内源=${MIRROR}）→ $TAG"
+
+# 构建容器的网络与代理：
+#   构建期需要访问 GitHub（克隆源码）与 apt 源。国内环境通常需要：
+#     -n host            让构建容器与宿主同网络（这样 127.0.0.1:10808 的宿主代理才可达）
+#     -p http://...      显式指定代理；不传则继承环境变量 HTTPS_PROXY/https_proxy
+DOCKER_ARGS=()
+[[ -n "$NETWORK" ]] && DOCKER_ARGS+=(--network "$NETWORK")
+PROXY="${PROXYARG:-${HTTPS_PROXY:-${https_proxy:-}}}"
+if [[ -n "$PROXY" ]]; then
+    DOCKER_ARGS+=(--build-arg "http_proxy=$PROXY" --build-arg "https_proxy=$PROXY"
+                  --build-arg "no_proxy=localhost,127.0.0.1")
+    echo "   构建容器代理: $PROXY $([[ "$NETWORK" == "host" ]] && echo '(网络=host，127.0.0.1 可达 ✓)' || echo '(注意：非 host 网络时 127.0.0.1 指向容器自身，代理不可达 ✗)')"
+else
+    echo "   构建容器代理: 未设置（直连）"
+fi
+
 $DOCKER build \
+    "${DOCKER_ARGS[@]}" \
     --build-arg CUDA_BASE="$BASE" \
     --build-arg CUDA_ARCH="$ARCH" \
     --build-arg KVMEM_JOBS="$JOBS" \

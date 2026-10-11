@@ -20,9 +20,15 @@
 ./docker/build-kvmem-image.sh -b nvidia/cuda:<13.2.x>-devel-ubuntu24.04   # 贴合作者工具链基线（tag 以 Docker Hub 为准）
 ```
 
+- **国内构建建议**：`./docker/build-kvmem-image.sh -m 1 -n host`
+  —— `-m 1` 让容器内 apt 走清华源；`-n host` 让**构建容器与宿主同网络**，这样宿主机代理
+  （如 `127.0.0.1:10808`）才可达、克隆 GitHub 源码才稳（脚本会自动透传 `HTTPS_PROXY`，也可 `-p` 显式指定）。
+  docker daemon 侧建议配 registry mirror 加速拉基础镜像。
+- **本机已实测**：`-a 86 -n host -m 1` 构建通过 → `llama-kvmem-bonsai:cuda13.3-arch86`，**2.25 GB**；
+  镜像在 `--gpus all` 下引擎能加载运行，入口脚本缺模型时给出明确报错。
 - 构建期会**克隆** `kvmem-llama.cpp`（分支 `kvmem-bonsai-llama.cpp`）与其 `llama.cpp` 子模块，
   revision 已 pin 在 Dockerfile 里（可复现）；需能访问 GitHub。
-- 首次约 **10~25 分钟**（含拉取 CUDA devel 基础镜像 ~7 GB）；产物镜像约 **3~4 GB**。
+- 首次约 **10~25 分钟**（含拉取 CUDA devel 基础镜像 ~7 GB）；产物镜像约 **2~4 GB**。
 - CI 也会自动构建并推送：`.github/workflows/docker-build-kvmem.yml` → `ghcr.io/<owner>/llama-kvmem-bonsai`。
   首次拉包前要在 GitHub 网页把该包设为 Public（或在本地 `docker login ghcr.io`）。
 
