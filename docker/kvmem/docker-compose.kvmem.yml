@@ -1,0 +1,43 @@
+# =============================================================================
+# 3060（sm_86）· llama.cpp + KVMem 线 · compose 起服务
+#
+#   docker compose -f docker/kvmem/docker-compose.kvmem.yml up -d      # 起
+#   docker compose -f docker/kvmem/docker-compose.kvmem.yml logs -f    # 看日志
+#   docker compose -f docker/kvmem/docker-compose.kvmem.yml down       # 停
+#
+# 前置：镜像已构建（./docker/build-kvmem-image.sh），模型已就位（models/*.gguf）
+# 客户端接 http://127.0.0.1:18210/v1 （压缩代理；18202 是引擎直连，一般不用）
+# =============================================================================
+services:
+  kvmem-3060:
+    image: llama-kvmem-bonsai:cuda13.3-arch86
+    container_name: kvmem-3060
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18210:18210"   # 上下文压缩代理（客户端接这个）
+      - "127.0.0.1:18202:18202"   # 引擎直连（调试用）
+    volumes:
+      # 模型目录（只读）：放 Ternary-Bonsai-2-27B-PTQ1_0.gguf；可选 MTP 版与视觉塔放同目录即自动启用
+      - ../../models:/models:ro
+      # 压缩代理的摘要状态（跨重启保留；想重置删掉这个卷即可）
+      - kvmem-proxy-state:/root/.cache
+    environment:
+      KVMEM_CTX: "131072"        # 逻辑上下文；长会话用 "262144"
+      KVMEM_RESERVE: "10240"     # 单轮输出预留（= 单轮上限，含思考）
+      KVMEM_BUDGET: "24576"      # GPU 检索窗口
+      KVMEM_KV: "q8_0"           # 30 系没有 FP8 张量核，别用 fp8
+      KVMEM_MTP: "1"             # 有 MTP 模型就自动开
+      KVMEM_VISION: "1"          # 有视觉塔就自动开（KVMEM_VISION_CPU=1 放 CPU）
+      KVMEM_PROXY: "1"           # 上下文自动压缩
+      KVMEM_PROXY_THRESHOLD: "45000"
+      KVMEM_REASONING_BUDGET: "4096"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  kvmem-proxy-state:

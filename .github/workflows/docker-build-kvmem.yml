@@ -1,0 +1,55 @@
+# =============================================================================
+# 自动打包（3060 线）：构建 llama.cpp + KVMem 的 sm_86 镜像并推送到 GHCR
+#
+# 产物：ghcr.io/<owner>/llama-kvmem-bonsai:cuda13.3-arch86（+ :latest）
+#   对应硬件：RTX 30 系（sm_86）。与 docker-build.yml（ninfer 线 89/120a）互不影响。
+#
+# 触发：push 触达 docker/kvmem/** 或 scripts/kvmem-proxy.py 或 patches/** 时；
+#       也可在 Actions 页面手动 Run workflow。
+# 说明：构建期会克隆 kvmem-llama.cpp 与其 llama.cpp 子模块（revision 已在 Dockerfile 里 pin），
+#       首次约 35 分钟（含拉取 CUDA devel 基础镜像）。
+# =============================================================================
+name: docker-build-kvmem
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/kvmem/**"
+      - "docker/build-kvmem-image.sh"
+      - "scripts/kvmem-proxy.py"
+      - "patches/**"
+      - ".github/workflows/docker-build-kvmem.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-86:
+    runs-on: ubuntu-latest
+    env:
+      KVMEM_JOBS: "3"   # runner 4 核 16GB：nvcc 单作业峰值 ~2GB，保守取值防 OOM/ICE
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 释放磁盘空间（CUDA devel 镜像 + 编译产物需要）
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghc || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: 构建镜像（arch 86 / RTX 30 系）
+        run: ./docker/build-kvmem-image.sh -a 86 -j "${KVMEM_JOBS}" -t llama-kvmem-bonsai:cuda13.3-arch86
+
+      - name: 登录 GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: 推送 GHCR
+        run: |
+          IMG="ghcr.io/${{ github.repository_owner }}/llama-kvmem-bonsai"
+          docker tag llama-kvmem-bonsai:cuda13.3-arch86 "$IMG:cuda13.3-arch86"
+          docker tag llama-kvmem-bonsai:cuda13.3-arch86 "$IMG:latest"
+          docker push "$IMG:cuda13.3-arch86"
+          docker push "$IMG:latest"

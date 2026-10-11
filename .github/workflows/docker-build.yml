@@ -13,7 +13,12 @@ name: docker-build
 on:
   push:
     branches: [main]
-    paths: ["docker/**", "vendor/**", ".github/workflows/docker-build.yml"]
+    # 注意：docker/kvmem/** 属于 3060 线（llama.cpp + KVMem），由 docker-build-kvmem.yml 负责，这里排除
+    paths:
+      - "docker/**"
+      - "!docker/kvmem/**"
+      - "vendor/**"
+      - ".github/workflows/docker-build.yml"
     tags: ["v*"]
   workflow_dispatch:
 

@@ -427,6 +427,11 @@ tail -3 "$(ls -t ~/kvmem-logs/kvmem-*.log | head -1)"   # 自动挑最近在写�
 | `n_gen = ..., tg = xx t/s` | 正在出字 |
 | 日志完全不动 | 这才叫卡住 |
 
+**想用容器跑这条线**（换机器、隔离环境）：镜像与用法见 **[docker/kvmem/README.md](docker/kvmem/README.md)**
+—— 默认架构 sm_86、镜像内含引擎 + 上下文压缩代理，模型只读挂载即可；
+CI 也会自动构建并推送 `ghcr.io/<owner>/llama-kvmem-bonsai:cuda13.3-arch86`。
+（注意：`docker/` 下那套 ninfer 镜像只支持 sm_89/120a，与 30 系无关。）
+
 **想做视频生成？** 12GB 卡能玩但只在"尝鲜档"（480p / 约 5 秒 / 每条十几分钟起步），
 选型、约束与施工步骤见 **[docs/本地视频生成-方案与约束.md](docs/本地视频生成-方案与约束.md)**。
 注意视频模型与文字模型**抢显存**，跑之前先 `./scripts/start-kvmem.sh stop`。

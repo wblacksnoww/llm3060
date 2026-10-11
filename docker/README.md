@@ -1,5 +1,9 @@
 # Docker 容器化部署（容器内编译 + 国内源）
 
+> **30 系（sm_86）请走 [docker/kvmem/](kvmem/README.md)** —— 那是 llama.cpp + KVMem 线的镜像
+> （默认 arch 86、内置视觉/MTP/上下文压缩代理）。**本目录的镜像是 ninfer 线，只支持 sm_89 / sm_120a（40/50 系）**，
+> 与 30 系无关。
+
 宿主机只要求: **x86_64 Linux + NVIDIA 驱动(r580+，支持 CUDA 13.x) + Docker + nvidia-container-toolkit**。
 无需在宿主机安装 CUDA Toolkit、GCC、FFmpeg 开发库 —— 编译与依赖全部在容器内完成，
 CUDA 用户态库随镜像走，显卡驱动用宿主的（NVIDIA 容器运行时透传，性能与宿主直跑无差别）。
