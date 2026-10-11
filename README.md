@@ -366,10 +366,20 @@ python3 scripts/suite_ninfer.py         # 深度套件：K 矩阵/投机一致�
 
 ```bash
 cd ninfer-bonsai-4070ti
-./scripts/start-kvmem.sh long     # 起服务：256K 上下文档（长会话用；首次建议先 work）
-./scripts/start-kvmem.sh status   # 看状态；logs 跟日志
+./scripts/start-kvmem.sh long     # 起服务：256K 上下文档（含视觉 + MTP + 压缩代理）
+./scripts/start-kvmem.sh status   # 看状态（引擎 + 代理分别报告）；logs 跟日志
 ./scripts/start-kvmem.sh stop     # 停掉（打游戏 / 跑视频生成前必做）
 ```
+
+客户端接 **`http://127.0.0.1:18210/v1`**（自动压缩代理），不要直接接 18202 ——
+代理会在历史超 4.5 万 token 时自动把早期对话压成滚动摘要，**长会话不再每轮等十几分钟**
+（实测 1.4 万 token 会话 → 引擎只收 1534 tok，且关键记忆点保住）。只要引擎：`KVMEM_PROXY=0`。
+
+| 默认开启 | 关闭方式 |
+|---|---|
+| 视觉（能贴图） | `KVMEM_VISION=0` |
+| MTP1 投机解码（+15~22% 出字） | `KVMEM_MTP=0` |
+| 上下文压缩代理（18210 端口） | `KVMEM_PROXY=0` |
 
 | 档位 | 逻辑上下文 | GPU 窗口 | 单轮输出上限 | 提示上限 | 用途 |
 |---|---|---|---|---|---|

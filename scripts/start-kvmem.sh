@@ -41,10 +41,16 @@ set -uo pipefail
 KVROOT="${KVROOT:-/mnt/D/code/kvmem-bonsai}"     # 引擎源码树 + 免 root CUDA 工具链
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL="${KVMEM_MODEL:-$REPO/models/Ternary-Bonsai-2-27B-PTQ1_0.gguf}"
-# MTP 投机解码（可选，+30% 左右 decode）：KVMEM_MTP=1 时换用 graft 过的 MTP 模型
-if [[ "${KVMEM_MTP:-0}" == "1" ]]; then
-    MODEL="${KVMEM_MODEL:-$REPO/models/Ternary-Bonsai-2-27B-PTQ1_0-MTP-r3-Q4_0.gguf}"
-    DRAFT_N="${KVMEM_DRAFT_N:-1}"       # 1 或 2（2 更快，草稿命中率略降）
+# MTP 投机解码（**默认开启**）：合并了 MTP 头的模型存在就自动用它（+15~22% decode）。
+#   KVMEM_MTP=0        关掉（回到无投机模型）
+#   KVMEM_DRAFT_N=2    草稿 2 个（3060 上实测反而更慢，别用）
+#   KVMEM_MODEL=<路径> 显式指定模型时，仅当路径含 MTP 才开投机
+MTP_MODEL="$REPO/models/Ternary-Bonsai-2-27B-PTQ1_0-MTP-r3-Q4_0.gguf"
+DRAFT_N="${KVMEM_DRAFT_N:-1}"
+USE_MTP=0
+if [[ "${KVMEM_MTP:-1}" != "0" && -r "$MTP_MODEL" ]]; then
+    if [[ -z "${KVMEM_MODEL:-}" ]]; then MODEL="$MTP_MODEL"; USE_MTP=1
+    elif [[ "$MODEL" == *MTP* ]]; then USE_MTP=1; fi
 fi
 BIN="$KVROOT/kvmem-src/build/bin/llama-kvmem-server"
 CUDA_LIB="$KVROOT/cuda-stage/usr/local/cuda-13.2/lib64"
@@ -95,6 +101,10 @@ stop)
             echo "未在运行 profile=$PROFILE"
         fi
     fi
+    # 压缩代理一并停
+    if [[ -f "$LOGDIR/kvmem-proxy.pid" ]] && kill -0 "$(cat "$LOGDIR/kvmem-proxy.pid")" 2>/dev/null; then
+        kill "$(cat "$LOGDIR/kvmem-proxy.pid")" && echo "已停止压缩代理" && rm -f "$LOGDIR/kvmem-proxy.pid"
+    fi
     exit 0
     ;;
 status)
@@ -103,6 +113,11 @@ status)
         curl -s --noproxy '*' -m 5 "http://127.0.0.1:$PORT/v1/models" | head -c 300; echo
     else
         echo "未在运行 profile=$PROFILE"
+    fi
+    if [[ -f "$LOGDIR/kvmem-proxy.pid" ]] && kill -0 "$(cat "$LOGDIR/kvmem-proxy.pid")" 2>/dev/null; then
+        echo "压缩代理: 运行中 pid=$(cat "$LOGDIR/kvmem-proxy.pid") 端口=${KVMEM_PROXY_PORT:-18210}"
+    else
+        echo "压缩代理: 未运行"
     fi
     exit 0
     ;;
@@ -119,10 +134,11 @@ export LD_LIBRARY_PATH="$CUDA_LIB:$KVROOT/cuda-stage/usr/local/cuda-13.2/nvvm/li
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 
-SPEC_ARGS=(--spec-type none)
-if [[ "${KVMEM_MTP:-0}" == "1" ]]; then
-    # 把 --spec-type none 换成 MTP；草稿 KV 用 f16（官方默认），草稿窗口= reserve 内
-    SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max "${DRAFT_N:-1}" --spec-kv-dtype f16)
+SPEC_ARGS=(--spec-type none); MTP_STATE="关"
+if [[ "$USE_MTP" == "1" ]]; then
+    # 草稿 KV 用 f16（官方默认）
+    SPEC_ARGS=(--spec-type draft-mtp --spec-draft-n-max "$DRAFT_N" --spec-kv-dtype f16)
+    MTP_STATE="开(MTP$DRAFT_N)"
 fi
 
 ARGS=(-m "$MODEL" -ngl 99 --host 127.0.0.1 --port "$PORT"
@@ -159,15 +175,35 @@ fi
 ARGS+=("${VISION_ARGS[@]}")
 
 VISION_STATE="关"; [[ ${#VISION_ARGS[@]} -gt 0 ]] && VISION_STATE="开"
-echo "启动 llama-kvmem-server | profile=$PROFILE | 端口=$PORT | 上下文=$CTX | GPU 窗口=$BUDGET+$RESERVE | KV=$KV | 视觉=$VISION_STATE"
+echo "启动 llama-kvmem-server | profile=$PROFILE | 端口=$PORT | 上下文=$CTX | GPU 窗口=$BUDGET+$RESERVE | KV=$KV | 视觉=$VISION_STATE | 投机=$MTP_STATE"
 echo "日志: $LOGFILE"
 nohup "$BIN" "${ARGS[@]}" >"$LOGFILE" 2>&1 &
 echo $! > "$PIDFILE"
 
+# 上下文自动压缩代理（**默认随服务启动**）：ZCode/客户端改连这个端口，
+# 历史超阈值时自动把较早消息压成滚动摘要，提示长度从此有硬上限。
+#   KVMEM_PROXY=0        不启动代理
+#   KVMEM_PROXY_PORT=18210  代理端口（默认 18210）
+PROXY_PORT="${KVMEM_PROXY_PORT:-18210}"
+PROXY_PIDFILE="$LOGDIR/kvmem-proxy.pid"
+if [[ "${KVMEM_PROXY:-1}" != "0" && -r "$REPO/scripts/kvmem-proxy.py" ]]; then
+    if [[ -f "$PROXY_PIDFILE" ]] && kill -0 "$(cat "$PROXY_PIDFILE")" 2>/dev/null; then
+        echo "压缩代理已在运行: http://127.0.0.1:$PROXY_PORT/v1"
+    else
+        KVMEM_PROXY_PORT="$PROXY_PORT" KVMEM_PROXY_UPSTREAM_PORT="$PORT" \
+            nohup python3 "$REPO/scripts/kvmem-proxy.py" >>"$LOGDIR/kvmem-proxy.log" 2>&1 &
+        echo $! > "$PROXY_PIDFILE"
+        sleep 1
+        kill -0 "$(cat "$PROXY_PIDFILE")" 2>/dev/null \
+            && echo "压缩代理已启动: http://127.0.0.1:$PROXY_PORT/v1 （客户端接这里）" \
+            || echo "警告: 压缩代理启动失败，看 $LOGDIR/kvmem-proxy.log"
+    fi
+fi
+
 # 等待就绪（模型 6 GB，首次加载约 10-30 s）
 for i in $(seq 1 90); do
     if curl -s --noproxy '*' -m 2 "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1; then
-        echo "就绪: http://127.0.0.1:$PORT/（Web UI 同址）"
+        echo "就绪: 引擎 http://127.0.0.1:$PORT ｜ 压缩代理 http://127.0.0.1:$PROXY_PORT/v1"
         exit 0
     fi
     kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { echo "进程已退出，看日志:"; tail -20 "$LOGFILE"; exit 1; }
