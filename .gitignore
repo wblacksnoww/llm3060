@@ -20,3 +20,7 @@ suite-results-*.json
 __pycache__/
 *.pyc
 HANDOFF.md
+
+# 外部材料（不随仓库分发；需要时用 git add -f 强制加入）
+get-docker.sh
+汇总-报告与技能*/

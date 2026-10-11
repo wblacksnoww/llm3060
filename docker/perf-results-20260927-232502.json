@@ -1,0 +1,100 @@
+{
+ "meta": {
+  "base": "http://127.0.0.1:8088",
+  "model": "qwen3.8-27b",
+  "max_model_len": 65536
+ },
+ "tests": {
+  "2_TTFT": {
+   "avg_ms": 126,
+   "min_ms": 113,
+   "p95_ms": 154,
+   "wall_avg_ms": 506
+  },
+  "3_持续解码": {
+   "avg": 77.6,
+   "min": 77.3,
+   "max": 77.7,
+   "unit": "tok/s",
+   "mtp_acc": 37.3,
+   "tok_per_round": 2.13
+  },
+  "4_输出64tok": {
+   "decode": 92.7,
+   "unit": "tok/s",
+   "out_n": 64
+  },
+  "4_输出256tok": {
+   "decode": 76.3,
+   "unit": "tok/s",
+   "out_n": 256
+  },
+  "4_输出512tok": {
+   "decode": 77.7,
+   "unit": "tok/s",
+   "out_n": 512
+  },
+  "4_输出1024tok": {
+   "decode": 94.1,
+   "unit": "tok/s",
+   "out_n": 1024
+  },
+  "5_预填曲线": {
+   "1k": 1978,
+   "4k": 2209,
+   "8k": 2216,
+   "16k": 2178,
+   "32k": 2050,
+   "unit": "tok/s"
+  },
+  "6_32k上下文解码": {
+   "decode": 69.7,
+   "unit": "tok/s",
+   "prefill": 2066,
+   "note": "对比第3项看KV带宽代价"
+  },
+  "7_大海捞针": {
+   "8k": "0/3",
+   "31k": "0/3",
+   "32k": "0/3"
+  },
+  "8_思考模式": {
+   "reasoning_tok_on": 166,
+   "reasoning_tok_off": 0,
+   "答案正确": true,
+   "wall_on_ms": 3486,
+   "wall_off_ms": 2565
+  },
+  "9_采样_greedy": {
+   "decode": 78.8,
+   "acc": 38.3
+  },
+  "9_采样_temp0.7": {
+   "decode": 76.1,
+   "acc": 35.9
+  },
+  "10_贪心确定性": {
+   "identical": true
+  },
+  "11_effort回归": {
+   "high": "HTTP400",
+   "medium": "HTTP400",
+   "low": "HTTP400",
+   "none": "2"
+  },
+  "12_并发2路": {
+   "wall_s": 2.9,
+   "avg_lat_ms": 2317,
+   "聚合_decode": 160.0
+  },
+  "12_并发4路": {
+   "wall_s": 5.9,
+   "avg_lat_ms": 3815,
+   "聚合_decode": 333.7
+  },
+  "13_稳定性20连发": {
+   "ok": 20,
+   "err": 0
+  }
+ }
+}

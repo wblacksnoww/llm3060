@@ -19,7 +19,7 @@
 ARG CUDA_BASE=nvidia/cuda:13.3.0
 FROM ${CUDA_BASE}-devel-ubuntu24.04 AS build
 
-ARG CUDA_ARCH=86
+ARG CUDA_ARCH=89
 ARG USE_MIRROR=1
 # 编译并行度：nvcc 单作业峰值 ~2GB 内存，20 核/30GB 机器建议 6（全并行会 OOM/ICE）
 ARG NINFER_JOBS=6
@@ -37,26 +37,14 @@ RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
         cmake libavcodec-dev libavformat-dev libavutil-dev libcurl4-openssl-dev \
-        libswresample-dev libswscale-dev ninja-build pkg-config g++ gcc git nlohmann-json3-dev python3 curl; \
+        libswresample-dev libswscale-dev ninja-build pkg-config; \
     rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && apt-get install -y git-lfs && rm -rf /var/lib/apt/lists/*
-
 
 WORKDIR /src
 COPY src/ /src/
 
-RUN curl -Lo /src/third_party/nlohmann/json.hpp https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-
-RUN rm -rf /src/third_party/spdlog && \
-    git clone --branch v1.11.0 --depth 1 https://ghfast.top/https://github.com/gabime/spdlog.git /src/third_party/spdlog
-
-RUN python3 -c 'import os; [open(p, "w", encoding="utf-8").write("#include <nlohmann/json.hpp>\nusing Json = nlohmann::json;\n" + open(p, encoding="utf-8").read()) for p in ["/src/src/artifact/reader.cpp", "/src/src/runtime/engine/context_cost.cpp"] if os.path.exists(p) and "#include <nlohmann/json.hpp>" not in open(p, encoding="utf-8").read()]'
-
 RUN cmake -S . -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=gcc \
-        -DCMAKE_CXX_COMPILER=g++ \
         -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
         -DNINFER_SM_COUNT=${NINFER_SM_COUNT} \
         -DNINFER_BUILD_APPS=ON \
