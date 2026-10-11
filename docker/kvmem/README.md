@@ -83,8 +83,39 @@ docker run --rm -it --gpus all \
 > ⚠️ **提示长度硬上限** = `KVMEM_CTX − KVMEM_RESERVE`（131072−10240 = 120832）。
 > 超了引擎会**秒拒** `prompt + max_tokens exceeds n_ctx`；压缩代理会在这之前先把早期对话摘要掉。
 
-## 5. 排错
+## 5. 验证镜像（一键自检）
 
+```bash
+./docker/kvmem/verify.sh                      # 默认检查 llama-kvmem-bonsai:cuda13.3-arch86
+```
+
+**不占显存**（容器里用 `KVMEM_NGL=0` 在 CPU 上跑整条链路），约 2 分钟。前提是本机装了 NVIDIA 驱动
+（容器要 `--gpus all` 注入驱动，只是不需要为模型留出显存）。八项检查：
+
+| # | 检查 | 为什么 |
+|---|---|---|
+| ① | 镜像 ENV 不含 `KVMEM_MODEL` | 含了会让入口脚本误判"用户指定了模型"，**跳过自动切 MTP 模型**（实测踩过） |
+| ② | 引擎二进制能加载（`--help`） | CUDA 运行库 + 驱动注入是否配齐 |
+| ③ | 缺模型时报错清晰 | 挂载路径配错时能立刻看出来 |
+| ④⑤ | 引擎端口 / 压缩代理端口 `/v1/models` 均 200 | 端口与代理绑定（容器内需 0.0.0.0） |
+| ⑥⑦ | 横幅显示 `视觉=开` / `投机=开(MTP1)` | 可选件是否真的挂上（且 MTP 换用了合并模型） |
+| ⑧ | 经代理真实生成一句话 | 端到端链路（分词→生成→API→代理） |
+
+> CPU 生成一句约 1~2 分钟（GPU 上几秒）。**唯一不在自检范围**的是 CUDA 内核执行路径 ——
+> 那需要显存，用下面的 GPU 冒烟测。
+
+**GPU 冒烟**（需要腾出约 7 GB 显存：先 `./scripts/start-kvmem.sh stop`）：
+
+```bash
+docker run --rm --gpus all -p 127.0.0.1:18202:18202 \
+  -v "$PWD/models:/models:ro" llama-kvmem-bonsai:cuda13.3-arch86
+# 另开一个终端：
+curl -s --noproxy '*' http://127.0.0.1:18202/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"你好"}],"max_tokens":64}'
+# 看返回里的 timings.predicted_per_second —— 3060 上应在 30 t/s 量级
+```
+
+## 6. 排错
 | 症状 | 处置 |
 |---|---|
 | 起容器就退，日志 `缺模型: /models/…` | 模型没挂对；确认 `models/*.gguf` 在仓库 `models/` 下，或自己 `-v <目录>:/models:ro` |
