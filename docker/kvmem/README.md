@@ -32,6 +32,45 @@
 - CI 也会自动构建并推送：`.github/workflows/docker-build-kvmem.yml` → `ghcr.io/<owner>/llama-kvmem-bonsai`。
   首次拉包前要在 GitHub 网页把该包设为 Public（或在本地 `docker login ghcr.io`）。
 
+### 不自己构建：直接用 CI 构建好的镜像（GHCR）
+
+推送到 `main` 且改动命中 `docker/kvmem/**` 等路径时，CI 会自动构建并推送：
+
+```
+ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86   ← RTX 30 系（sm_86）
+ghcr.io/wblacksnoww/llama-kvmem-bonsai:latest
+```
+
+```bash
+# ① 让 daemon 能拉私有包（任选其一）
+#    a) 建一个 classic PAT 勾上 read:packages，然后登录：
+echo "<你的PAT>" | docker login ghcr.io -u wblacksnoww --password-stdin
+#    b) 或在 GitHub 网页把该包设为 Public：Package settings → Change visibility
+
+# ② 拉取
+docker pull ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86
+
+# ③ 起服务（模型只读挂载；端口与宿主脚本一致）
+docker run -d --name kvmem-3060 --gpus all --restart unless-stopped \
+  -p 127.0.0.1:18210:18210 -p 127.0.0.1:18202:18202 \
+  -v "$PWD/models:/models:ro" \
+  ghcr.io/wblacksnoww/llama-kvmem-bonsai:cuda13.3-arch86
+# 或把 docker-compose.kvmem.yml 里的 image: 换成上面的 GHCR 地址，再 compose up -d
+```
+
+**"拉下来"不等于"直接能用"** —— 三件前置：
+
+| 前置 | 说明 |
+|---|---|
+| **模型**（约 6 GB） | 镜像**不含权重**：把 `.gguf` 放进 `models/` 并挂载到 `/models`（与 ninfer 线同设计） |
+| **NVIDIA 驱动 + nvidia-container-toolkit** | 镜像带 CUDA **用户态库**（cudart/cublas），但显卡与驱动来自宿主 —— 容器变不出显卡 |
+| **架构必须匹配** | `arch86` 只能跑 **RTX 30 系**；40 系要 `arch89`、50 系要 `arch120a`。不匹配会在运行期报 `cudaErrorSymbolNotFound` / `no kernel image is available for execution on the device` |
+| 端口 18202/18210 空闲 | 与宿主脚本互切时要等约 60 秒（TIME-WAIT，见 §6 排错） |
+
+> 国内拉 `ghcr.io` 常慢或超时：给 docker daemon 配代理
+> （`/etc/systemd/system/docker.service.d/http-proxy.conf` 里写 `HTTPS_PROXY=http://127.0.0.1:<端口>`，
+> 再 `systemctl daemon-reload && systemctl restart docker`）；或直接在本机自建（§1，约 15 分钟）。
+
 ## 2. 放模型（镜像不含权重）
 
 把下面文件放进**仓库的 `models/`**（compose 会只读挂载到容器 `/models`）：
